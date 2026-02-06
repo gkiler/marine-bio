@@ -1,6 +1,10 @@
 """
 Idealist scraper - idealist.org (filtered by environment/science)
 
+NOTE: This site requires JavaScript rendering. Job listings are dynamically loaded
+and not present in the static HTML. Selectors below are best-guess patterns and will
+not work without a JavaScript-enabled browser/scraper (e.g., Playwright, Selenium).
+
 Flow:
 1. Fetch Idealist job search page with environment/science filters
 2. Parse job listings from HTML using BeautifulSoup

@@ -1,3 +1,6 @@
+# NOTE: This site does not contain job listings. It has informational content about careers in oceanography.
+# TAMU jobs are posted through the university's main HR system.
+# This scraper is kept for compatibility but will return empty results.
 """
 Texas A&M Oceanography jobs scraper (HTML).
 

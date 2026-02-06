@@ -2,6 +2,10 @@
 Ecological Society of America job scraper.
 
 Scrapes: https://www.esa.org/career-center
+
+NOTE: This site redirects (307) and uses EcoEvoJobs (https://ecoevojobs.net),
+which is a Google Spreadsheet. The /career-center URL is not directly scrapable.
+Selectors are best-guess patterns.
 """
 
 import logging

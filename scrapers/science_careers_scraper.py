@@ -25,111 +25,94 @@ class ScienceCareers(BaseScraper):
 
     scraper_id = "science_careers"
 
-    def search(self, query_params: dict | None = None) -> str:
+    def search(self, query_params: dict | None = None) -> list[str]:
         """
-        Fetch Science Careers job listings page.
+        Fetch Science Careers job listings pages with pagination.
 
-        Returns HTML string of the job search results.
+        Returns list of HTML strings (one per page).
         """
-        url = "https://jobs.sciencecareers.org/jobs"
-        params = {
-            "keywords": "marine biology oceanography aquatic ecology",
-            "page": "1",
-        }
+        url = "https://jobs.sciencecareers.org/jobs/"
+        # Pagination: Next link is in li.paginator__item > a (text="Next")
+        return self.fetch_paginated(url, next_link_selector="li.paginator__item > a", max_pages=10)
 
-        if query_params:
-            params.update(query_params)
-
-        logger.info("Fetching Science Careers jobs with params: %s", params)
-        response = self.fetch(url, params=params)
-        return response.text
-
-    def parse(self, raw_data: str) -> list[Job]:
+    def parse(self, raw_data: list[str]) -> list[Job]:
         """
-        Parse Science Careers HTML into Job objects.
+        Parse Science Careers HTML into Job objects (multi-page).
 
-        Handles missing fields gracefully by setting to None.
+        Verified structure (2026-02):
+          li.lister__item (job container, has id="item-{job_id}")
+            div.lister__details
+              h3.lister__header > a.js-clickable-area-link (href="/job/{id}/{slug}")
+              ul.lister__meta
+                li.lister__meta-item--location (location text)
+                li.lister__meta-item--salary (salary text)
+                li.lister__meta-item--recruiter (employer name)
+              p.lister__description (description snippet)
         """
-        soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
+        pages = raw_data if isinstance(raw_data, list) else [raw_data]
 
-        # Science Careers uses li or div tags for job listings
-        job_cards = (
-            soup.find_all("li", class_="job")
-            or soup.find_all("div", class_="job-result")
-            or soup.find_all("article", class_="job")
-        )
+        job_elements = []
+        for page_html in pages:
+            soup = BeautifulSoup(page_html, "lxml")
+            job_elements.extend(soup.find_all("li", class_="lister__item"))
 
-        if not job_cards:
-            logger.warning("No job cards found - page structure may have changed")
+        if not job_elements:
+            logger.warning("Science Careers: No li.lister__item elements found")
             return jobs
 
-        for card in job_cards:
+        for element in job_elements:
             try:
-                # Extract job link
-                job_link = card.find("a", class_="job-title") or card.find("a", href=True)
-                if not job_link:
+                # Title + URL from h3.lister__header > a
+                header = element.find("h3", class_="lister__header")
+                if not header:
+                    continue
+                link = header.find("a", class_="js-clickable-area-link")
+                if not link or not link.get("href"):
                     continue
 
-                url = job_link.get("href", "")
+                title = link.get_text(strip=True)
+                url = link["href"].strip()
                 if not url.startswith("http"):
                     url = f"https://jobs.sciencecareers.org{url}"
 
-                # Extract unique ID from URL
-                source_id = url.split("/")[-1] if "/" in url else url
+                # Job ID from element id attribute (e.g., "item-677025")
+                element_id = element.get("id", "")
+                if element_id.startswith("item-"):
+                    source_id = element_id.replace("item-", "")
+                else:
+                    # Fallback: extract from URL
+                    source_id = url.split("/")[-2] if "/" in url else str(hash(url) % 1000000)
                 job_id = f"science_careers_{source_id}"
 
-                # Title
-                title = job_link.get_text(strip=True) or "Unknown Title"
+                # Employer, location, salary from ul.lister__meta
+                employer = "Unknown Employer"
+                location_text = None
+                salary_range = None
 
-                # Employer
-                employer_elem = card.find("span", class_="company") or card.find(
-                    "div", class_="employer"
-                ) or card.find("a", class_="employer")
-                employer = (
-                    employer_elem.get_text(strip=True)
-                    if employer_elem
-                    else "Unknown Employer"
-                )
+                meta_list = element.find("ul", class_="lister__meta")
+                if meta_list:
+                    for meta_item in meta_list.find_all("li", class_="lister__meta-item"):
+                        if "lister__meta-item--recruiter" in meta_item.get("class", []):
+                            employer = meta_item.get_text(strip=True)
+                        elif "lister__meta-item--location" in meta_item.get("class", []):
+                            location_text = meta_item.get_text(strip=True)
+                        elif "lister__meta-item--salary" in meta_item.get("class", []):
+                            salary_range = meta_item.get_text(strip=True)
 
-                # Location
-                location_elem = card.find("span", class_="location") or card.find(
-                    "div", class_="location"
-                )
-                location = (
-                    location_elem.get_text(strip=True) if location_elem else None
-                )
-                location_city, location_state, remote = self._parse_location(location)
+                # Parse location into city/state/country
+                location_city, location_state, location_country, remote = self._parse_location(location_text)
 
-                # Description
-                desc_elem = card.find("div", class_="description") or card.find(
-                    "p", class_="snippet"
-                )
+                # Description from p.lister__description
+                desc_elem = element.find("p", class_="lister__description")
                 description = (
                     desc_elem.get_text(strip=True)
                     if desc_elem
-                    else "No description available"
+                    else f"{title} at {employer}"
                 )
 
-                # Job type
-                job_type_elem = card.find("span", class_="job-type")
-                job_type = (
-                    job_type_elem.get_text(strip=True).lower()
-                    if job_type_elem
-                    else "full-time"
-                )
-
-                # Posted date
-                date_elem = card.find("time") or card.find("span", class_="date")
-                posted_date = self._parse_date(
-                    date_elem.get_text(strip=True) if date_elem else None
-                )
-
-                # Salary
-                salary_elem = card.find("span", class_="salary")
-                salary_range = (
-                    salary_elem.get_text(strip=True) if salary_elem else None
-                )
+                # Job type - default to full-time
+                job_type = "full-time"
 
                 jobs.append(
                     Job(
@@ -138,27 +121,29 @@ class ScienceCareers(BaseScraper):
                         employer=employer,
                         location_city=location_city,
                         location_state=location_state,
+                        location_country=location_country,
                         remote=remote,
                         description=description,
                         salary_range=salary_range,
                         job_type=job_type,
-                        posted_date=posted_date,
+                        posted_date=None,
+                        application_deadline=None,
                         url=url,
                         source=self.scraper_id,
                     )
                 )
 
             except Exception as e:
-                logger.warning("Failed to parse job card: %s", e)
+                logger.error("Error parsing Science Careers job: %s", e)
                 continue
 
         logger.info("Parsed %d jobs from Science Careers", len(jobs))
         return jobs
 
-    def _parse_location(self, location: str | None) -> tuple[str | None, str | None, bool]:
-        """Parse location string into city, state, and remote flag."""
+    def _parse_location(self, location: str | None) -> tuple[str | None, str | None, str, bool]:
+        """Parse location string into city, state, country, and remote flag."""
         if not location:
-            return None, None, False
+            return None, None, "USA", False
 
         location_lower = location.lower()
         remote = "remote" in location_lower or "virtual" in location_lower
@@ -166,11 +151,35 @@ class ScienceCareers(BaseScraper):
         # Remove remote indicator
         location = location.replace("(Remote)", "").replace("Remote", "").strip()
 
+        # Split by comma and parse
         parts = [p.strip() for p in location.split(",")]
-        city = parts[0] if parts else None
-        state = parts[1] if len(parts) > 1 else None
+        if len(parts) == 0:
+            return None, None, "USA", remote
 
-        return city, state, remote
+        city = parts[0] if parts[0] else None
+
+        # Check if last part looks like a country (has parentheses or is capitalized)
+        country = "USA"
+        state = None
+
+        if len(parts) >= 2:
+            last_part = parts[-1].strip()
+            # If it's in parentheses like "(US)", it's a country code
+            if last_part.startswith("(") and last_part.endswith(")"):
+                country = last_part.strip("()")
+                # If there are 3+ parts, middle is state/province
+                if len(parts) >= 3:
+                    state = parts[-2].strip()
+            # If it looks like a country code (2-3 uppercase letters)
+            elif len(last_part) <= 3 and last_part.isupper():
+                country = last_part
+                if len(parts) >= 3:
+                    state = parts[-2].strip()
+            else:
+                # Assume it's a US state if 2-letter code or state name
+                state = last_part
+
+        return city, state, country, remote
 
     def _parse_date(self, date_str: str | None) -> datetime | None:
         """Parse date string into datetime object."""

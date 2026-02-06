@@ -25,99 +25,94 @@ class NatureCareers(BaseScraper):
 
     scraper_id = "nature_careers"
 
-    def search(self, query_params: dict | None = None) -> str:
+    def search(self, query_params: dict | None = None) -> list[str]:
         """
-        Fetch Nature Careers job listings page.
+        Fetch Nature Careers job listings pages with pagination.
 
-        Returns HTML string of the job search results.
+        Returns list of HTML strings (one per page).
         """
-        url = "https://www.nature.com/naturecareers/jobs"
-        params = {
-            "q": "marine biology oceanography aquatic",
-            "page": "1",
-        }
+        url = "https://www.nature.com/naturecareers/jobs/"
+        # Pagination: Next link is in li.paginator__item > a (text="Next")
+        return self.fetch_paginated(url, next_link_selector="li.paginator__item > a", max_pages=10)
 
-        if query_params:
-            params.update(query_params)
-
-        logger.info("Fetching Nature Careers jobs with params: %s", params)
-        response = self.fetch(url, params=params)
-        return response.text
-
-    def parse(self, raw_data: str) -> list[Job]:
+    def parse(self, raw_data: list[str]) -> list[Job]:
         """
-        Parse Nature Careers HTML into Job objects.
+        Parse Nature Careers HTML into Job objects (multi-page).
 
-        Handles missing fields gracefully by setting to None.
+        Verified structure (2026-02):
+          li.lister__item--premium-job (job container, has id="item-{job_id}")
+            div.lister__details
+              h3.lister__header > a.js-clickable-area-link (href="/naturecareers/job/{id}/{slug}")
+              ul.lister__meta
+                li.lister__meta-item--location (location text)
+                li.lister__meta-item--salary (salary text)
+                li.lister__meta-item--recruiter (employer name)
+              p.lister__description (description snippet)
         """
-        soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
+        pages = raw_data if isinstance(raw_data, list) else [raw_data]
 
-        # Nature Careers uses article tags for job listings
-        job_cards = soup.find_all("article", class_="job-listing") or soup.find_all(
-            "div", class_="job-item"
-        )
+        job_elements = []
+        for page_html in pages:
+            soup = BeautifulSoup(page_html, "lxml")
+            job_elements.extend(soup.find_all("li", class_="lister__item--premium-job"))
 
-        if not job_cards:
-            logger.warning("No job cards found - page structure may have changed")
+        if not job_elements:
+            logger.warning("Nature Careers: No li.lister__item--premium-job elements found")
             return jobs
 
-        for card in job_cards:
+        for element in job_elements:
             try:
-                # Extract job ID from data attribute or link
-                job_link = card.find("a", href=True)
-                if not job_link:
+                # Title + URL from h3.lister__header > a
+                header = element.find("h3", class_="lister__header")
+                if not header:
+                    continue
+                link = header.find("a", class_="js-clickable-area-link")
+                if not link or not link.get("href"):
                     continue
 
-                url = job_link.get("href", "")
+                title = link.get_text(strip=True)
+                url = link["href"].strip()
                 if not url.startswith("http"):
                     url = f"https://www.nature.com{url}"
 
-                # Extract unique ID from URL
-                source_id = url.split("/")[-1] if "/" in url else url
+                # Job ID from element id attribute (e.g., "item-12848708")
+                element_id = element.get("id", "")
+                if element_id.startswith("item-"):
+                    source_id = element_id.replace("item-", "")
+                else:
+                    # Fallback: extract from URL
+                    source_id = url.split("/")[-2] if "/" in url else str(hash(url) % 1000000)
                 job_id = f"nature_careers_{source_id}"
 
-                # Title
-                title_elem = card.find("h3") or card.find("h2") or job_link
-                title = title_elem.get_text(strip=True) if title_elem else "Unknown Title"
+                # Employer, location, salary from ul.lister__meta
+                employer = "Unknown Employer"
+                location_text = None
+                salary_range = None
 
-                # Employer
-                employer_elem = card.find("span", class_="employer") or card.find(
-                    "div", class_="employer"
-                )
-                employer = (
-                    employer_elem.get_text(strip=True)
-                    if employer_elem
-                    else "Unknown Employer"
-                )
+                meta_list = element.find("ul", class_="lister__meta")
+                if meta_list:
+                    for meta_item in meta_list.find_all("li", class_="lister__meta-item"):
+                        if "lister__meta-item--recruiter" in meta_item.get("class", []):
+                            employer = meta_item.get_text(strip=True)
+                        elif "lister__meta-item--location" in meta_item.get("class", []):
+                            location_text = meta_item.get_text(strip=True)
+                        elif "lister__meta-item--salary" in meta_item.get("class", []):
+                            salary_range = meta_item.get_text(strip=True)
 
-                # Location
-                location_elem = card.find("span", class_="location") or card.find(
-                    "div", class_="location"
-                )
-                location = (
-                    location_elem.get_text(strip=True) if location_elem else None
-                )
-                location_city, location_state, remote = self._parse_location(location)
+                # Parse location into city/state/country
+                location_city, location_state, location_country, remote = self._parse_location(location_text)
 
-                # Description
-                desc_elem = card.find("div", class_="description") or card.find("p")
+                # Description from p.lister__description
+                desc_elem = element.find("p", class_="lister__description")
                 description = (
                     desc_elem.get_text(strip=True)
                     if desc_elem
-                    else "No description available"
+                    else f"{title} at {employer}"
                 )
 
-                # Job type - Nature Careers typically has academic/research positions
-                job_type = "full-time"  # Default assumption for Nature Careers
-
-                # Posted date
-                date_elem = card.find("time") or card.find(
-                    "span", class_="posted-date"
-                )
-                posted_date = self._parse_date(
-                    date_elem.get_text(strip=True) if date_elem else None
-                )
+                # Job type - default to full-time for Nature Careers
+                job_type = "full-time"
 
                 jobs.append(
                     Job(
@@ -126,26 +121,29 @@ class NatureCareers(BaseScraper):
                         employer=employer,
                         location_city=location_city,
                         location_state=location_state,
+                        location_country=location_country,
                         remote=remote,
                         description=description,
+                        salary_range=salary_range,
                         job_type=job_type,
-                        posted_date=posted_date,
+                        posted_date=None,
+                        application_deadline=None,
                         url=url,
                         source=self.scraper_id,
                     )
                 )
 
             except Exception as e:
-                logger.warning("Failed to parse job card: %s", e)
+                logger.error("Error parsing Nature Careers job: %s", e)
                 continue
 
         logger.info("Parsed %d jobs from Nature Careers", len(jobs))
         return jobs
 
-    def _parse_location(self, location: str | None) -> tuple[str | None, str | None, bool]:
-        """Parse location string into city, state, and remote flag."""
+    def _parse_location(self, location: str | None) -> tuple[str | None, str | None, str, bool]:
+        """Parse location string into city, state, country, and remote flag."""
         if not location:
-            return None, None, False
+            return None, None, "USA", False
 
         location_lower = location.lower()
         remote = "remote" in location_lower or "virtual" in location_lower
@@ -153,11 +151,35 @@ class NatureCareers(BaseScraper):
         # Remove remote indicator
         location = location.replace("(Remote)", "").replace("Remote", "").strip()
 
+        # Split by comma and parse
         parts = [p.strip() for p in location.split(",")]
-        city = parts[0] if parts else None
-        state = parts[1] if len(parts) > 1 else None
+        if len(parts) == 0:
+            return None, None, "USA", remote
 
-        return city, state, remote
+        city = parts[0] if parts[0] else None
+
+        # Check if last part looks like a country (has parentheses or is capitalized)
+        country = "USA"
+        state = None
+
+        if len(parts) >= 2:
+            last_part = parts[-1].strip()
+            # If it's in parentheses like "(CN)", it's a country code
+            if last_part.startswith("(") and last_part.endswith(")"):
+                country = last_part.strip("()")
+                # If there are 3+ parts, middle is state/province
+                if len(parts) >= 3:
+                    state = parts[-2].strip()
+            # If it looks like a country name (not a US state)
+            elif len(last_part) <= 3 and last_part.isupper():
+                country = last_part
+                if len(parts) >= 3:
+                    state = parts[-2].strip()
+            else:
+                # Assume it's a US state if 2-letter code or known state name
+                state = last_part
+
+        return city, state, country, remote
 
     def _parse_date(self, date_str: str | None) -> datetime | None:
         """Parse date string into datetime object."""

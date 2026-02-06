@@ -39,48 +39,53 @@ class AZAScraper(BaseScraper):
         """
         Parse AZA job listings from HTML.
 
-        Extracts job cards with title, employer, location, and URL.
-        Handles missing fields gracefully.
+        Verified structure (2026-02):
+          table.jobs-list > tr (skip header row)
+            td[0]: a.job-posting-title (has href="?job=XXXXX"), span.job-posting-company
+            td[1]: span.job-posting-location
+            td[2]: span.job-posting-date
+            td[3]: span.job-posting-member-organization
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # Look for common job listing patterns
-        # Try multiple selectors as the exact structure is unknown
-        job_cards = (
-            soup.find_all("div", class_=lambda x: x and "job" in x.lower())
-            or soup.find_all("article", class_=lambda x: x and "job" in x.lower())
-            or soup.find_all("li", class_=lambda x: x and "job" in x.lower())
-        )
+        # Find the jobs table
+        table = soup.find("table", class_="jobs-list")
+        if not table:
+            logger.warning("AZA: No table.jobs-list found")
+            return jobs
 
-        for idx, card in enumerate(job_cards):
+        rows = table.find_all("tr")[1:]  # Skip header row
+        logger.info("AZA: Found %d job rows", len(rows))
+
+        for row in rows:
             try:
-                # Extract title
-                title_elem = (
-                    card.find("h2")
-                    or card.find("h3")
-                    or card.find("a", class_=lambda x: x and "title" in x.lower() if x else False)
-                )
-                if not title_elem:
+                cells = row.find_all("td")
+                if len(cells) < 3:
                     continue
 
-                title = title_elem.get_text(strip=True)
-
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if not link_elem:
+                # Cell 0: Title + Employer
+                title_link = cells[0].find("a", class_="job-posting-title")
+                if not title_link:
                     continue
-                url = link_elem["href"]
-                if not url.startswith("http"):
-                    url = f"https://www.aza.org{url}"
 
-                # Extract employer
-                employer_elem = card.find(class_=lambda x: x and ("employer" in x.lower() or "organization" in x.lower()) if x else False)
-                employer = employer_elem.get_text(strip=True) if employer_elem else "AZA Member"
+                title = title_link.get_text(strip=True)
+                job_href = title_link.get("href", "")
 
-                # Extract location
-                location_elem = card.find(class_=lambda x: x and "location" in x.lower() if x else False)
-                location_text = location_elem.get_text(strip=True) if location_elem else None
+                # Extract job ID from href (e.g., "?job=50133")
+                job_num = job_href.split("=")[-1] if "=" in job_href else hash(job_href) % 1000000
+                job_id = f"aza_{job_num}"
+
+                # Full URL
+                url = f"https://www.aza.org/jobs{job_href}" if job_href.startswith("?") else job_href
+
+                # Employer
+                employer_span = cells[0].find("span", class_="job-posting-company")
+                employer = employer_span.get_text(strip=True) if employer_span else "AZA Member"
+
+                # Cell 1: Location
+                location_span = cells[1].find("span", class_="job-posting-location")
+                location_text = location_span.get_text(strip=True) if location_span else ""
 
                 location_city = None
                 location_state = None
@@ -92,23 +97,31 @@ class AZAScraper(BaseScraper):
                     elif len(parts) == 1:
                         location_state = parts[0]
 
-                # Extract description (snippet if available)
-                description_elem = card.find("p") or card.find("div", class_=lambda x: x and "description" in x.lower() if x else False)
-                description = description_elem.get_text(strip=True) if description_elem else "Job details available on AZA website"
+                # Cell 2: Posted date
+                date_span = cells[2].find("span", class_="job-posting-date")
+                date_text = date_span.get_text(strip=True) if date_span else ""
+
+                # Try to parse date (format: "Feb 05, 2026")
+                posted_date = None
+                if date_text:
+                    try:
+                        posted_date = datetime.strptime(date_text, "%b %d, %Y")
+                    except ValueError:
+                        pass
 
                 job = Job(
-                    job_id=f"aza_{idx}_{hash(url) % 100000}",
+                    job_id=job_id,
                     title=title,
                     employer=employer,
                     location_city=location_city,
                     location_state=location_state,
                     location_country="USA",
                     remote=False,
-                    description=description,
+                    description=f"{title} at {employer}. Posted {date_text}.",
                     requirements=[],
                     salary_range=None,
                     job_type="full-time",
-                    posted_date=None,
+                    posted_date=posted_date,
                     application_deadline=None,
                     url=url,
                     source=self.scraper_id,
@@ -117,7 +130,7 @@ class AZAScraper(BaseScraper):
                 jobs.append(job)
 
             except Exception as e:
-                logger.warning("Failed to parse AZA job card %d: %s", idx, e)
+                logger.error("Error parsing AZA job row: %s", e)
                 continue
 
         logger.info("AZA scraper parsed %d jobs", len(jobs))

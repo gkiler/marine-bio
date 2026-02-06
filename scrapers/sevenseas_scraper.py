@@ -1,3 +1,5 @@
+# NOTE: This site requires JavaScript rendering. Job listings are loaded dynamically.
+# Selectors are best-guess patterns that will not work without a headless browser.
 """
 Seven Seas Media ocean jobs scraper (HTML).
 

@@ -1,3 +1,7 @@
+# NOTE: TNC uses Phenom People career site (careers.tnc.org) that requires JavaScript.
+# Job listings are dynamically loaded. This scraper will return 0 jobs.
+# Consider using Selenium or API integration.
+
 """
 The Nature Conservancy careers scraper.
 

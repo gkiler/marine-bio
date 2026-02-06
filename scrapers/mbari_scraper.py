@@ -30,8 +30,8 @@ class MBARIScraper(BaseScraper):
     scraper_id = "mbari"
 
     def search(self, query_params: dict | None = None) -> str:
-        """Fetch MBARI careers page HTML."""
-        url = "https://www.mbari.org/about/careers"
+        """Fetch MBARI job openings page HTML."""
+        url = "https://www.mbari.org/about/careers/job-openings/"
         response = self.fetch(url)
         return response.text
 
@@ -39,83 +39,71 @@ class MBARIScraper(BaseScraper):
         """
         Parse MBARI job listings from HTML.
 
-        Extracts marine research positions.
-        Handles missing fields gracefully.
+        Verified structure (2026-02):
+          article.list-item--job-opening > a.list-item__link (wraps entire job)
+            h1.list-item__title (job title)
+            div.list-item__excerpt > p (description snippet)
+
+        URL pattern: https://www.mbari.org/job-opening/{slug}/
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # Look for job listing patterns
-        job_cards = (
-            soup.find_all("div", class_=lambda x: x and ("job" in x.lower() or "position" in x.lower() or "opening" in x.lower() or "career" in x.lower()) if x else False)
-            or soup.find_all("tr", class_=lambda x: x and "job" in x.lower() if x else False)
-            or soup.find_all("li", class_=lambda x: x and ("job" in x.lower() or "position" in x.lower()) if x else False)
-            or soup.find_all("article")
-        )
+        # Find job articles
+        job_articles = soup.find_all("article", class_="list-item--job-opening")
+        if not job_articles:
+            logger.warning("MBARI: No article.list-item--job-opening elements found")
+            return jobs
 
-        for idx, card in enumerate(job_cards):
+        logger.info("MBARI: Found %d job articles", len(job_articles))
+
+        for article in job_articles:
             try:
-                # Extract title
-                title_elem = (
-                    card.find("h2")
-                    or card.find("h3")
-                    or card.find("h4")
-                    or card.find("a", class_=lambda x: x and "title" in x.lower() if x else False)
-                    or card.find("strong")
-                )
-                if not title_elem:
+                # Get the link (wraps the entire article content)
+                link = article.find("a", class_="list-item__link")
+                if not link or not link.get("href"):
                     continue
 
-                title = title_elem.get_text(strip=True)
+                url = link["href"]
 
-                # Skip if not a job title
-                if len(title) < 5 or title.lower() in ["careers", "jobs", "openings"]:
+                # Extract job ID from URL (e.g., /job-opening/ocean-observatory-trainee/)
+                job_slug = url.rstrip("/").split("/")[-1] if "/" in url else hash(url) % 1000000
+                job_id = f"mbari_{job_slug}"
+
+                # Title from h1.list-item__title
+                title_h1 = article.find("h1", class_="list-item__title")
+                if not title_h1:
                     continue
+                title = title_h1.get_text(strip=True)
 
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if link_elem:
-                    url = link_elem["href"]
-                    if not url.startswith("http"):
-                        url = f"https://www.mbari.org{url}"
-                else:
-                    url = "https://www.mbari.org/about/careers"
+                # Description excerpt from div.list-item__excerpt > p
+                excerpt_div = article.find("div", class_="list-item__excerpt")
+                description = title
+                if excerpt_div:
+                    excerpt_p = excerpt_div.find("p")
+                    if excerpt_p:
+                        description = excerpt_p.get_text(strip=True)[:200]
 
-                # MBARI is the employer
-                employer = "Monterey Bay Aquarium Research Institute"
-
-                # Location is Moss Landing, CA
-                location_city = "Moss Landing"
-                location_state = "CA"
-
-                # Extract description
-                description_elem = (
-                    card.find("p")
-                    or card.find("div", class_=lambda x: x and "description" in x.lower() if x else False)
-                    or card.find_next_sibling("p")
-                )
-                description = description_elem.get_text(strip=True) if description_elem else f"Marine research position at MBARI in Moss Landing, CA. {title}"
-
-                # Determine job type
+                # Determine job type from title
                 job_type = "full-time"
                 title_lower = title.lower()
                 if "intern" in title_lower:
+                    job_type = "internship"
+                elif "trainee" in title_lower or "apprentice" in title_lower:
                     job_type = "internship"
                 elif "fellow" in title_lower or "postdoc" in title_lower:
                     job_type = "full-time"
                 elif "volunteer" in title_lower:
                     job_type = "volunteer"
-                elif "part-time" in title_lower or "part time" in title_lower:
-                    job_type = "part-time"
                 elif "seasonal" in title_lower or "summer" in title_lower:
                     job_type = "seasonal"
 
                 job = Job(
-                    job_id=f"mbari_{idx}_{hash(title) % 100000}",
+                    job_id=job_id,
                     title=title,
-                    employer=employer,
-                    location_city=location_city,
-                    location_state=location_state,
+                    employer="Monterey Bay Aquarium Research Institute",
+                    location_city="Moss Landing",
+                    location_state="CA",
                     location_country="USA",
                     remote=False,
                     description=description,
@@ -131,7 +119,7 @@ class MBARIScraper(BaseScraper):
                 jobs.append(job)
 
             except Exception as e:
-                logger.warning("Failed to parse MBARI job card %d: %s", idx, e)
+                logger.error("Error parsing MBARI job: %s", e)
                 continue
 
         logger.info("MBARI scraper parsed %d jobs", len(jobs))

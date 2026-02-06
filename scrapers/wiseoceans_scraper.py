@@ -21,84 +21,91 @@ class WiseOceansScraper(BaseScraper):
 
     scraper_id = "wiseoceans"
 
-    def search(self, query_params: dict | None = None) -> str:
-        """Fetch the Wise Oceans jobs page."""
+    def search(self, query_params: dict | None = None) -> list[str]:
+        """Fetch all pages of Wise Oceans jobs (paginated)."""
         url = "https://wiseoceans.com/jobs"
-        response = self.fetch(url)
-        return response.text
+        # Pagination uses <a rel="next">
+        return self.fetch_paginated(url, next_link_selector="a[rel='next']", max_pages=10)
 
-    def parse(self, raw_data: str) -> list[Job]:
+    def parse(self, raw_data: list[str]) -> list[Job]:
         """
         Parse marine conservation job listings from Wise Oceans.
 
-        Assumes job board with listing cards for conservation positions.
+        Verified structure (2026-02):
+          article.job-block
+            h5 > a (title + URL)
+            span.company (employer name)
+            span.location (location with icon)
+            div.uk-text-small (job type, posted date)
         """
-        soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
+        pages = raw_data if isinstance(raw_data, list) else [raw_data]
 
-        # Look for job listing elements
-        job_elements = soup.find_all("div", class_=lambda x: x and "job" in x.lower()) or \
-                       soup.find_all("article") or \
-                       soup.find_all("li", class_=lambda x: x and "position" in x.lower())
+        job_elements = []
+        for page_html in pages:
+            soup = BeautifulSoup(page_html, "lxml")
+            job_elements.extend(soup.find_all("article", class_="job-block"))
 
         if not job_elements:
-            logger.warning("Wise Oceans: No job elements found")
+            logger.warning("Wise Oceans: No article.job-block elements found")
             return jobs
 
         for element in job_elements:
             try:
-                # Extract title
-                title_elem = element.find("h2") or element.find("h3") or element.find("a", class_=lambda x: x and ("title" in x.lower() or "role" in x.lower()))
-                if not title_elem:
+                # Title + URL from h5 > a
+                title_h5 = element.find("h5")
+                if not title_h5:
+                    continue
+                link = title_h5.find("a")
+                if not link or not link.get("href"):
                     continue
 
-                title = title_elem.get_text(strip=True)
-
-                # Get URL
-                link_elem = title_elem.find("a") if title_elem.name != "a" else title_elem
-                if not link_elem or not link_elem.get("href"):
-                    continue
-
-                url = link_elem["href"]
-                if url.startswith("/"):
+                title = link.get_text(strip=True)
+                url = link["href"]
+                if not url.startswith("http"):
                     url = f"https://wiseoceans.com{url}"
 
-                # Extract employer
-                employer_elem = element.find(class_=lambda x: x and ("company" in x.lower() or "employer" in x.lower() or "organization" in x.lower()))
+                # Job ID from URL
+                job_id_slug = url.rstrip("/").split("/")[-1]
+                job_id = f"wiseoceans_{job_id_slug}"
+
+                # Employer from span.company
+                employer_elem = element.find("span", class_="company")
                 employer = employer_elem.get_text(strip=True) if employer_elem else "Unknown Organization"
 
-                # Extract location
-                location_elem = element.find(class_=lambda x: x and "location" in x.lower())
+                # Location from span.location (has icon, extract text)
                 location_city = None
                 location_state = None
+                location_country = "Unknown"
                 remote = False
+                location_elem = element.find("span", class_="location")
                 if location_elem:
                     location_text = location_elem.get_text(strip=True)
                     if "remote" in location_text.lower():
                         remote = True
-                    parts = location_text.split(",")
+                    # Parse "City, Country" format
+                    parts = [p.strip() for p in location_text.split(",")]
+                    if len(parts) >= 1:
+                        location_city = parts[0]
                     if len(parts) >= 2:
-                        location_city = parts[0].strip()
-                        location_state = parts[1].strip()
+                        location_country = parts[-1]
+                        if len(parts) == 3:
+                            location_state = parts[1]
 
-                # Extract description
-                desc_elem = element.find("p") or element.find("div", class_=lambda x: x and "description" in x.lower())
-                description = desc_elem.get_text(strip=True) if desc_elem else "See job posting for details"
-
-                # Job type - conservation jobs are often volunteer or internship
-                job_type_elem = element.find(class_=lambda x: x and "type" in x.lower())
+                # Job type from badges or text (volunteer/internship/full-time)
                 job_type = "full-time"
-                if job_type_elem:
-                    type_text = job_type_elem.get_text(strip=True).lower()
-                    if "volunteer" in type_text:
+                badges = element.find_all("span", class_="job-badge")
+                for badge in badges:
+                    badge_text = badge.get_text(strip=True).lower()
+                    if "volunteer" in badge_text:
                         job_type = "volunteer"
-                    elif "intern" in type_text:
+                    elif "intern" in badge_text:
                         job_type = "internship"
-                    elif "part-time" in type_text or "part time" in type_text:
+                    elif "part" in badge_text:
                         job_type = "part-time"
 
-                # Generate unique ID
-                job_id = f"wiseoceans_{hash(url) % 1000000}"
+                # Description (there's no visible description in the listing, use title)
+                description = f"{title} at {employer}"
 
                 job = Job(
                     job_id=job_id,
@@ -106,7 +113,7 @@ class WiseOceansScraper(BaseScraper):
                     employer=employer,
                     location_city=location_city,
                     location_state=location_state,
-                    location_country="USA",
+                    location_country=location_country,
                     remote=remote,
                     description=description,
                     requirements=[],

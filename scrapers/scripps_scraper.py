@@ -39,90 +39,79 @@ class ScrippsScraper(BaseScraper):
         """
         Parse Scripps job listings from HTML.
 
-        Extracts oceanographic research positions.
-        Handles missing fields gracefully.
+        Verified structure (2026-02):
+          section.block-jobs > ul.list > li
+            strong > a[href] (title and URL to UCSD employment system)
+            text node after <br/> (department info, e.g., "CLIMATE/ATMOS SCI/PHY OCEANOG (100% Career)")
+
+        Note: Jobs link to https://employment.ucsd.edu/jobs?keyword=XXXXXX
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # Look for job listing patterns
-        job_cards = (
-            soup.find_all("div", class_=lambda x: x and ("job" in x.lower() or "position" in x.lower() or "posting" in x.lower()) if x else False)
-            or soup.find_all("tr", class_=lambda x: x and "job" in x.lower() if x else False)
-            or soup.find_all("li", class_=lambda x: x and ("job" in x.lower() or "position" in x.lower()) if x else False)
-            or soup.find_all("article")
-        )
+        # Find the jobs block
+        jobs_block = soup.find("section", class_="block-jobs")
+        if not jobs_block:
+            logger.warning("Scripps: No section.block-jobs found")
+            return jobs
 
-        for idx, card in enumerate(job_cards):
+        # Find the list of jobs
+        job_list = jobs_block.find("ul", class_="list")
+        if not job_list:
+            logger.warning("Scripps: No ul.list found in jobs block")
+            return jobs
+
+        list_items = job_list.find_all("li")
+        logger.info("Scripps: Found %d job list items", len(list_items))
+
+        for li in list_items:
             try:
-                # Extract title
-                title_elem = (
-                    card.find("h2")
-                    or card.find("h3")
-                    or card.find("h4")
-                    or card.find("a", class_=lambda x: x and "title" in x.lower() if x else False)
-                )
-                if not title_elem:
+                # Get the link (inside <strong>)
+                strong = li.find("strong")
+                if not strong:
                     continue
 
-                title = title_elem.get_text(strip=True)
-
-                # Skip if not a job title
-                if len(title) < 5:
+                link = strong.find("a", href=True)
+                if not link:
                     continue
 
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if link_elem:
-                    url = link_elem["href"]
-                    if not url.startswith("http"):
-                        url = f"https://scripps.ucsd.edu{url}"
-                else:
-                    url = "https://scripps.ucsd.edu/portal/jobs"
+                url = link["href"]
+                # Full title is in link text (e.g., "138123 Field Research and Development Eng. 3")
+                full_title = link.get_text(strip=True)
 
-                # Scripps is the employer
-                employer = "Scripps Institution of Oceanography"
+                # Extract job number and title
+                parts = full_title.split(" ", 1)
+                job_num = parts[0] if parts else hash(url) % 1000000
+                title = parts[1] if len(parts) > 1 else full_title
 
-                # Location is La Jolla, CA (part of UCSD)
-                location_city = "La Jolla"
-                location_state = "CA"
+                job_id = f"scripps_{job_num}"
 
-                # Extract description
-                description_elem = (
-                    card.find("p")
-                    or card.find("div", class_=lambda x: x and "description" in x.lower() if x else False)
-                )
-                description = description_elem.get_text(strip=True) if description_elem else f"Oceanographic research position at Scripps Institution. {title}"
+                # Get department/division info (text after <br/>)
+                # This is in the text content after the <strong> tag
+                dept_text = li.get_text(strip=True).replace(full_title, "").strip()
 
-                # Extract department/division if available
-                dept_elem = card.find(class_=lambda x: x and ("department" in x.lower() or "division" in x.lower()) if x else False)
-                if dept_elem:
-                    dept_text = dept_elem.get_text(strip=True)
-                    description = f"{dept_text} - {description}"
-
-                # Determine job type
+                # Determine job type from department text
                 job_type = "full-time"
+                if "career" in dept_text.lower():
+                    job_type = "full-time"
+                elif "limited" in dept_text.lower() or "temporary" in dept_text.lower():
+                    job_type = "seasonal"
+
                 title_lower = title.lower()
                 if "intern" in title_lower:
                     job_type = "internship"
                 elif "postdoc" in title_lower or "fellow" in title_lower:
-                    job_type = "full-time"  # Postdocs typically full-time
-                elif "volunteer" in title_lower:
-                    job_type = "volunteer"
-                elif "part-time" in title_lower or "part time" in title_lower:
-                    job_type = "part-time"
-                elif "seasonal" in title_lower:
-                    job_type = "seasonal"
+                    job_type = "full-time"
 
                 job = Job(
-                    job_id=f"scripps_{idx}_{hash(url) % 100000}",
+                    job_id=job_id,
                     title=title,
-                    employer=employer,
-                    location_city=location_city,
-                    location_state=location_state,
+                    employer="Scripps Institution of Oceanography",
+                    location_city="La Jolla",
+                    location_state="CA",
                     location_country="USA",
                     remote=False,
-                    description=description,
+                    description=f"{title} - {dept_text}" if dept_text else title,
                     requirements=[],
                     salary_range=None,
                     job_type=job_type,
@@ -135,7 +124,7 @@ class ScrippsScraper(BaseScraper):
                 jobs.append(job)
 
             except Exception as e:
-                logger.warning("Failed to parse Scripps job card %d: %s", idx, e)
+                logger.error("Error parsing Scripps job: %s", e)
                 continue
 
         logger.info("Scripps scraper parsed %d jobs", len(jobs))

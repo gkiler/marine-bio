@@ -2,6 +2,10 @@
 Society for Marine Mammalogy job scraper.
 
 Scrapes: https://www.marinemammalscience.org/job-board
+
+NOTE: This URL returns 404. The /job-board page does not exist.
+The organization may have moved or discontinued their job board.
+Selectors are best-guess patterns.
 """
 
 import logging

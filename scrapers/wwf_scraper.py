@@ -1,3 +1,6 @@
+# NOTE: WWF website blocks automated requests (403 Forbidden).
+# Consider using authenticated browser automation or API if available.
+
 """
 World Wildlife Fund careers scraper.
 

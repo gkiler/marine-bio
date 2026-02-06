@@ -13,6 +13,7 @@ import time
 from abc import ABC, abstractmethod
 
 import httpx
+from bs4 import BeautifulSoup
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -148,21 +149,69 @@ class BaseScraper(ABC):
 
         return response
 
+    def fetch_paginated(
+        self,
+        first_url: str,
+        next_link_selector: str = "a[rel='next']",
+        max_pages: int = 10,
+    ) -> list[str]:
+        """
+        Fetch multiple pages by following "next" links.
+
+        Args:
+            first_url: URL of the first page.
+            next_link_selector: CSS selector for the "next page" link.
+            max_pages: Safety cap to avoid infinite loops.
+
+        Returns list of HTML strings, one per page.
+        """
+        pages: list[str] = []
+        url: str | None = first_url
+
+        for page_num in range(max_pages):
+            if url is None:
+                break
+
+            response = self.fetch(url)
+            html = response.text
+            pages.append(html)
+            logger.debug("%s: fetched page %d (%s)", self.scraper_id, page_num + 1, url)
+
+            # Find next page link
+            soup = BeautifulSoup(html, "lxml")
+            next_link = soup.select_one(next_link_selector)
+            if next_link and next_link.get("href"):
+                next_url = next_link["href"]
+                # Handle relative URLs
+                if next_url.startswith("/"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    next_url = f"{parsed.scheme}://{parsed.netloc}{next_url}"
+                url = next_url
+            else:
+                url = None
+
+        logger.info("%s: fetched %d pages", self.scraper_id, len(pages))
+        return pages
+
     @abstractmethod
-    def search(self, query_params: dict | None = None) -> str | dict:
+    def search(self, query_params: dict | None = None) -> str | dict | list[str]:
         """
         Fetch raw data from the job source.
 
-        Returns HTML string or parsed JSON dict depending on source type.
+        Returns HTML string, parsed JSON dict, or list of HTML strings
+        (when using pagination via fetch_paginated).
         """
         ...
 
     @abstractmethod
-    def parse(self, raw_data: str | dict) -> list[Job]:
+    def parse(self, raw_data: str | dict | list[str]) -> list[Job]:
         """
         Parse raw response into Job objects.
 
-        Should handle missing fields gracefully — set to None rather than crash.
+        raw_data may be a single HTML string, a JSON dict, or a list of
+        HTML page strings (pagination). Should handle missing fields
+        gracefully — set to None rather than crash.
         """
         ...
 

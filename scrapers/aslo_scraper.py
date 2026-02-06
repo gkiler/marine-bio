@@ -2,6 +2,10 @@
 Association for the Sciences of Limnology and Oceanography job scraper.
 
 Scrapes: https://www.aslo.org/career-center
+
+NOTE: This URL returns 404. The /career-center page does not exist.
+The site has /public-policy/careers-in-public-policy/ but no general job board.
+Selectors are best-guess patterns.
 """
 
 import logging

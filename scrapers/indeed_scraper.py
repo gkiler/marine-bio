@@ -1,6 +1,11 @@
 """
 Indeed scraper - indeed.com (search: "marine biology")
 
+NOTE: This site requires JavaScript rendering. Job listings are dynamically loaded
+and not present in the static HTML. Indeed also implements aggressive bot detection.
+Selectors below are best-guess patterns and will not work without a JavaScript-enabled
+browser/scraper (e.g., Playwright, Selenium) and may require proxy/anti-detection measures.
+
 Flow:
 1. Fetch Indeed job search page with marine biology keywords
 2. Parse job listings from HTML using BeautifulSoup

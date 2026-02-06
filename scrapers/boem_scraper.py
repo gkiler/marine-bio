@@ -1,3 +1,6 @@
+# NOTE: BOEM does not host jobs directly. All BOEM positions are posted on USAJOBS.gov.
+# This scraper will return 0 jobs. Use the USAJOBS scraper instead.
+
 """
 Bureau of Ocean Energy Management employment scraper.
 

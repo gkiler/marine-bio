@@ -2,6 +2,10 @@
 American Fisheries Society job scraper.
 
 Scrapes: https://jobs.fisheries.org
+
+NOTE: This site returns 403 Forbidden (access blocked).
+The site may require authentication or have anti-scraping measures.
+Selectors are best-guess patterns.
 """
 
 import logging

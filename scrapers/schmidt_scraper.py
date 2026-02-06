@@ -31,59 +31,71 @@ class SchmidtScraper(BaseScraper):
         """
         Parse job listings from Schmidt Marine.
 
-        Assumes job board with listing cards.
+        Verified structure (2026-02):
+          div[data-testid="job-list-item"]
+            div[itemtype="https://schema.org/JobPosting"]
+              [itemprop="title"] (job title)
+              [itemprop="hiringOrganization"] (employer name)
+              [itemprop="addressLocality"] (location)
+              a[href="/companies/.../jobs/..."] (job URL)
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # Look for job listing elements
-        job_elements = soup.find_all("div", class_=lambda x: x and "job" in x.lower()) or \
-                       soup.find_all("article") or \
-                       soup.find_all("li", class_=lambda x: x and "position" in x.lower())
-
+        job_elements = soup.find_all("div", attrs={"data-testid": "job-list-item"})
         if not job_elements:
-            logger.warning("Schmidt Marine: No job elements found")
+            logger.warning("Schmidt Marine: No job-list-item elements found")
             return jobs
 
         for element in job_elements:
             try:
-                # Extract title
-                title_elem = element.find("h2") or element.find("h3") or element.find("a", class_=lambda x: x and ("title" in x.lower() or "position" in x.lower()))
+                # Find schema.org JobPosting div
+                schema_div = element.find("div", itemtype="https://schema.org/JobPosting")
+                if not schema_div:
+                    continue
+
+                # Title from itemprop="title"
+                title_elem = schema_div.find(attrs={"itemprop": "title"})
                 if not title_elem:
                     continue
-
                 title = title_elem.get_text(strip=True)
 
-                # Get URL
-                link_elem = title_elem.find("a") if title_elem.name != "a" else title_elem
-                if not link_elem or not link_elem.get("href"):
+                # URL from job link
+                job_link = schema_div.find("a", href=lambda x: x and "/jobs/" in x)
+                if not job_link or not job_link.get("href"):
                     continue
-
-                url = link_elem["href"]
+                url = job_link["href"]
                 if url.startswith("/"):
                     url = f"https://jobs.schmidtmarine.org{url}"
 
-                # Extract employer - likely Schmidt Marine or partner organizations
-                employer_elem = element.find(class_=lambda x: x and ("company" in x.lower() or "organization" in x.lower()))
+                # Job ID from URL (extract numeric ID)
+                job_id_num = url.split("/jobs/")[-1].split("-")[0] if "/jobs/" in url else hash(url) % 1000000
+                job_id = f"schmidt_{job_id_num}"
+
+                # Employer from itemprop="hiringOrganization"
+                employer_elem = schema_div.find(attrs={"itemprop": "hiringOrganization"})
                 employer = employer_elem.get_text(strip=True) if employer_elem else "Schmidt Marine Technology Partners"
 
-                # Extract location
-                location_elem = element.find(class_=lambda x: x and "location" in x.lower())
+                # Location from itemprop="addressLocality"
                 location_city = None
                 location_state = None
+                location_elem = schema_div.find(attrs={"itemprop": "addressLocality"})
                 if location_elem:
                     location_text = location_elem.get_text(strip=True)
-                    parts = location_text.split(",")
-                    if len(parts) >= 2:
-                        location_city = parts[0].strip()
-                        location_state = parts[1].strip()
+                    if location_text:
+                        parts = [p.strip() for p in location_text.split(",")]
+                        if len(parts) >= 1:
+                            location_city = parts[0]
+                        if len(parts) >= 2:
+                            location_state = parts[1]
 
-                # Extract description
-                desc_elem = element.find("p") or element.find("div", class_=lambda x: x and "description" in x.lower())
-                description = desc_elem.get_text(strip=True) if desc_elem else "See job posting for details"
+                # Description from itemprop="description"
+                desc_elem = schema_div.find(attrs={"itemprop": "description"})
+                description = desc_elem.get_text(strip=True) if desc_elem and desc_elem.get_text(strip=True) else f"{title} at {employer}"
 
-                # Generate unique ID
-                job_id = f"schmidt_{hash(url) % 1000000}"
+                # Posted date from itemprop="datePosted"
+                posted_elem = schema_div.find(attrs={"itemprop": "datePosted"})
+                posted_text = posted_elem.get_text(strip=True) if posted_elem else ""
 
                 job = Job(
                     job_id=job_id,
@@ -93,7 +105,7 @@ class SchmidtScraper(BaseScraper):
                     location_state=location_state,
                     location_country="USA",
                     remote=False,
-                    description=description,
+                    description=f"{description}. Posted: {posted_text}." if posted_text else description,
                     requirements=[],
                     salary_range=None,
                     job_type="full-time",

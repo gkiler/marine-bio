@@ -3,6 +3,9 @@ Mote Marine Laboratory job scraper.
 
 Scrapes: https://mote.org/about/employment-opportunities
 High priority: Florida-based marine research institution.
+
+NOTE: This site requires JavaScript rendering. Selectors are best-guess patterns.
+The page loads with heading "Current Open Positions:" but job listings are dynamically loaded.
 """
 
 import logging

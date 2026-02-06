@@ -37,39 +37,25 @@ class OceanaScraper(BaseScraper):
         """
         Parse Oceana HTML to extract job listings.
 
-        Expected structure: job cards with title, location, description.
-        Handle missing fields gracefully.
+        Verified structure (2026-02):
+          div.php-to-be-replaced-with-shortcode.wpv-block-loop-item
+            h2.tb-heading (location)
+            p.tb-heading > a (title + href)
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # Look for job listings (adjust selectors based on actual page structure)
-        # Oceana typically uses article or div elements for job cards
-        job_cards = soup.find_all("article", class_=lambda x: x and "job" in x.lower()) or \
-                    soup.find_all("div", class_=lambda x: x and "job" in x.lower()) or \
-                    soup.find_all("div", class_="position")
+        # Find job items (server-rendered from PHP shortcode)
+        job_cards = soup.find_all("div", class_="wpv-block-loop-item")
+        if not job_cards:
+            logger.warning("Oceana: No div.wpv-block-loop-item elements found")
+            return jobs
 
         for idx, card in enumerate(job_cards):
             try:
-                # Extract title
-                title_elem = card.find("h2") or card.find("h3") or card.find("a")
-                if not title_elem:
-                    continue
-                title = title_elem.get_text(strip=True)
-
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if link_elem:
-                    url = link_elem["href"]
-                    if not url.startswith("http"):
-                        url = f"https://oceana.org{url}"
-                else:
-                    url = "https://oceana.org/employment-opportunities"
-
-                # Extract location
-                location_elem = card.find(class_=lambda x: x and "location" in x.lower()) or \
-                               card.find("span", string=lambda s: s and "location" in s.lower())
-                location_text = location_elem.get_text(strip=True) if location_elem else None
+                # Location from h2.tb-heading
+                location_h2 = card.find("h2", class_="tb-heading")
+                location_text = location_h2.get_text(strip=True) if location_h2 else None
 
                 city, state = None, None
                 remote = False
@@ -81,34 +67,31 @@ class OceanaScraper(BaseScraper):
                     if len(parts) >= 2:
                         state = parts[1].strip()
 
-                # Extract description
-                desc_elem = card.find("p") or card.find(class_="description")
-                description = desc_elem.get_text(strip=True) if desc_elem else title
+                # Title + URL from p.tb-heading > a
+                title_p = card.find("p", class_="tb-heading")
+                if not title_p:
+                    continue
+                link = title_p.find("a", href=True)
+                if not link:
+                    continue
 
-                # Extract job type
-                type_elem = card.find(class_=lambda x: x and "type" in x.lower())
-                job_type_text = type_elem.get_text(strip=True).lower() if type_elem else "full-time"
-                if "intern" in job_type_text:
-                    job_type = "internship"
-                elif "volunteer" in job_type_text:
-                    job_type = "volunteer"
-                elif "part" in job_type_text:
-                    job_type = "part-time"
-                else:
-                    job_type = "full-time"
+                title = link.get_text(strip=True)
+                url = link["href"]
+                if not url.startswith("http"):
+                    url = f"https://oceana.org{url}"
 
                 job = Job(
-                    job_id=f"{self.scraper_id}_{idx}",
+                    job_id=f"{self.scraper_id}_{hash(url) % 1000000}",
                     title=title,
                     employer="Oceana",
                     location_city=city,
                     location_state=state,
                     location_country="USA",
                     remote=remote,
-                    description=description,
+                    description=f"{title} at Oceana",
                     requirements=[],
                     salary_range=None,
-                    job_type=job_type,
+                    job_type="full-time",
                     posted_date=None,
                     application_deadline=None,
                     url=url,

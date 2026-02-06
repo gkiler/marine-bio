@@ -2,6 +2,10 @@
 Woods Hole Oceanographic Institution job scraper.
 
 Scrapes: https://careers.whoi.edu
+
+NOTE: This site uses Workday ATS (external system at https://whoi.wd5.myworkdayjobs.com/WHOI-External).
+The main careers page redirects to Workday, which requires JavaScript rendering.
+Selectors are best-guess patterns.
 """
 
 import logging

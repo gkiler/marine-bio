@@ -1,3 +1,7 @@
+# NOTE: WCS uses Brass Ring (IBM Kenexa) external job board.
+# Jobs are hosted at https://sjobs.brassring.com/... and require JavaScript.
+# This scraper will return 0 jobs. Consider using Selenium or API integration.
+
 """
 Wildlife Conservation Society careers scraper.
 

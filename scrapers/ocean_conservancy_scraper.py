@@ -1,7 +1,11 @@
+# NOTE: Ocean Conservancy uses ADP Workforce Now (external job board).
+# Jobs are hosted at https://workforcenow.adp.com/... and require JavaScript.
+# This scraper will return 0 jobs. Consider using Selenium or API integration.
+
 """
 Ocean Conservancy jobs scraper.
 
-Scrapes https://oceanconservancy.org/about/jobs for marine conservation jobs.
+Scrapes https://oceanconservancy.org/our-people/career-opportunities/ for marine conservation jobs.
 Uses HTML parsing with BeautifulSoup4.
 """
 
@@ -29,7 +33,7 @@ class OceanConservancyScraper(BaseScraper):
 
         Returns raw HTML.
         """
-        url = "https://oceanconservancy.org/about/jobs"
+        url = "https://oceanconservancy.org/our-people/career-opportunities/"
         response = self.fetch(url)
         return response.text
 

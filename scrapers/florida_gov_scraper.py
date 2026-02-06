@@ -1,3 +1,7 @@
+# NOTE: The URL https://myfwc.com/about/overview/careers returns 404.
+# Florida FWC careers page may have moved. This scraper will fail.
+# Consider checking https://myfwc.com or https://jobs.myflorida.com for the correct URL.
+
 """
 Florida government marine careers scraper.
 

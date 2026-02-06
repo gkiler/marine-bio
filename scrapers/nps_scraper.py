@@ -1,3 +1,7 @@
+# NOTE: NPS does not host jobs directly. All NPS positions are posted on USAJOBS.gov.
+# The work-with-us page links to https://www.usajobs.gov/Search?keyword='national park service'
+# This scraper will return 0 jobs. Use the USAJOBS scraper instead.
+
 """
 National Park Service careers scraper.
 

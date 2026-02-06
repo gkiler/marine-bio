@@ -1,3 +1,4 @@
+# NOTE: Site times out and likely requires JavaScript rendering. Selectors are best-guess.
 """
 Climatebase marine/ocean jobs scraper (HTML).
 

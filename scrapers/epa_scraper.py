@@ -1,3 +1,6 @@
+# NOTE: EPA does not host jobs directly. All EPA positions are posted on USAJOBS.gov.
+# This scraper will return 0 jobs. Use the USAJOBS scraper instead.
+
 """
 EPA careers scraper.
 

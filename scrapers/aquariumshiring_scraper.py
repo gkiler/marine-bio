@@ -29,78 +29,84 @@ class AquariumsHiringScraper(BaseScraper):
 
     scraper_id = "aquariumshiring"
 
-    def search(self, query_params: dict | None = None) -> str:
-        """Fetch AquariumsHiring.com page HTML."""
+    def search(self, query_params: dict | None = None) -> list[str]:
+        """Fetch all pages of AquariumsHiring.com jobs."""
         url = "https://www.aquariumshiring.com"
-        response = self.fetch(url)
-        return response.text
+        # Pagination: <a class="pagination-next" href="/2">Next page</a>
+        return self.fetch_paginated(url, next_link_selector="a.pagination-next", max_pages=10)
 
-    def parse(self, raw_data: str) -> list[Job]:
+    def parse(self, raw_data: list[str]) -> list[Job]:
         """
-        Parse aquarium job listings from HTML.
+        Parse aquarium job listings from HTML (multi-page).
 
-        Extracts job cards with title, employer, location, and URL.
-        Handles missing fields gracefully.
+        Verified structure (2026-02):
+          div.card > a[href] (job URL)
+            div.card-content > div.media
+              div.media-content
+                h2.title.is-4 (job title)
+                h3.subtitle.is-6 (employer name, location separated by <br/>)
         """
-        soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
+        pages = raw_data if isinstance(raw_data, list) else [raw_data]
 
-        # Look for job listing patterns
-        job_cards = (
-            soup.find_all("div", class_=lambda x: x and "job" in x.lower())
-            or soup.find_all("article")
-            or soup.find_all("li", class_=lambda x: x and ("posting" in x.lower() or "listing" in x.lower()) if x else False)
-        )
+        job_cards = []
+        for page_html in pages:
+            soup = BeautifulSoup(page_html, "lxml")
+            job_cards.extend(soup.find_all("div", class_="card"))
 
-        for idx, card in enumerate(job_cards):
+        if not job_cards:
+            logger.warning("AquariumsHiring: No div.card elements found")
+            return jobs
+
+        logger.info("AquariumsHiring: Found %d job cards", len(job_cards))
+
+        for card in job_cards:
             try:
-                # Extract title
-                title_elem = (
-                    card.find("h2")
-                    or card.find("h3")
-                    or card.find("h4")
-                    or card.find("a", class_=lambda x: x and "title" in x.lower() if x else False)
-                )
-                if not title_elem:
+                # Get the link (wraps entire card)
+                link = card.find("a", href=True)
+                if not link:
                     continue
 
-                title = title_elem.get_text(strip=True)
-
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if not link_elem:
-                    continue
-                url = link_elem["href"]
+                url = link["href"]
                 if not url.startswith("http"):
                     url = f"https://www.aquariumshiring.com{url}"
 
-                # Extract employer (aquarium name)
-                employer_elem = (
-                    card.find(class_=lambda x: x and ("employer" in x.lower() or "aquarium" in x.lower() or "facility" in x.lower()) if x else False)
-                    or card.find("strong")
-                )
-                employer = employer_elem.get_text(strip=True) if employer_elem else "Aquarium"
+                # Extract job ID from URL (e.g., /jobs/veterinary-technician-atlanta-2)
+                job_slug = url.split("/")[-1] if "/" in url else hash(url) % 1000000
+                job_id = f"aquariumshiring_{job_slug}"
 
-                # Extract location
-                location_elem = card.find(class_=lambda x: x and "location" in x.lower() if x else False)
-                location_text = location_elem.get_text(strip=True) if location_elem else None
+                # Title from h2.title.is-4
+                title_h2 = card.find("h2", class_="title")
+                if not title_h2:
+                    continue
+                title = title_h2.get_text(strip=True)
 
+                # Employer + location from h3.subtitle.is-6 (separated by <br/>)
+                subtitle_h3 = card.find("h3", class_="subtitle")
+                if not subtitle_h3:
+                    continue
+
+                # Split by <br/> to get employer and location
+                subtitle_parts = subtitle_h3.decode_contents().split("<br/>")
+                employer = BeautifulSoup(subtitle_parts[0], "lxml").get_text(strip=True) if subtitle_parts else "Unknown Aquarium"
+                location_text = BeautifulSoup(subtitle_parts[1], "lxml").get_text(strip=True) if len(subtitle_parts) > 1 else ""
+
+                # Parse location (format: "Atlanta, United States")
                 location_city = None
                 location_state = None
+                location_country = "USA"
                 if location_text:
                     parts = [p.strip() for p in location_text.split(",")]
                     if len(parts) >= 2:
                         location_city = parts[0]
-                        location_state = parts[1]
+                        # Could be state or country
+                        second_part = parts[1]
+                        if second_part in ["United States", "USA"]:
+                            location_country = "USA"
+                        else:
+                            location_state = second_part
                     elif len(parts) == 1:
-                        location_state = parts[0]
-
-                # Extract description
-                description_elem = (
-                    card.find("p")
-                    or card.find("div", class_=lambda x: x and "description" in x.lower() if x else False)
-                )
-                description = description_elem.get_text(strip=True) if description_elem else "Aquarium position details available online"
+                        location_city = parts[0]
 
                 # Determine job type from title
                 job_type = "full-time"
@@ -115,14 +121,14 @@ class AquariumsHiringScraper(BaseScraper):
                     job_type = "seasonal"
 
                 job = Job(
-                    job_id=f"aquariumshiring_{idx}_{hash(url) % 100000}",
+                    job_id=job_id,
                     title=title,
                     employer=employer,
                     location_city=location_city,
                     location_state=location_state,
-                    location_country="USA",
+                    location_country=location_country,
                     remote=False,
-                    description=description,
+                    description=f"{title} at {employer}.",
                     requirements=[],
                     salary_range=None,
                     job_type=job_type,
@@ -135,7 +141,7 @@ class AquariumsHiringScraper(BaseScraper):
                 jobs.append(job)
 
             except Exception as e:
-                logger.warning("Failed to parse AquariumsHiring job card %d: %s", idx, e)
+                logger.error("Error parsing AquariumsHiring job card: %s", e)
                 continue
 
         logger.info("AquariumsHiring scraper parsed %d jobs", len(jobs))

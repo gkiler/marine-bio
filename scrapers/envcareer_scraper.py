@@ -29,106 +29,90 @@ class EnvironmentalCareer(BaseScraper):
         """
         Fetch EnvironmentalCareer job listings page.
 
-        Returns HTML string of the job search results.
+        Returns HTML string of the job search results. No pagination on this site.
         """
-        url = "https://www.environmentalcareer.com/jobs"
-        params = {
-            "keywords": "marine biology oceanography aquatic",
-            "location": "",
-        }
-
-        if query_params:
-            params.update(query_params)
-
-        logger.info("Fetching EnvironmentalCareer jobs with params: %s", params)
-        response = self.fetch(url, params=params)
+        url = "https://environmentalcareer.com/jobs/"
+        logger.info("Fetching EnvironmentalCareer jobs")
+        response = self.fetch(url)
         return response.text
 
     def parse(self, raw_data: str) -> list[Job]:
         """
         Parse EnvironmentalCareer HTML into Job objects.
 
-        Handles missing fields gracefully by setting to None.
+        Verified structure (2026-02):
+          article.listing-item
+            div.listing-item__title > a.link (href="/job/{id}/{slug}", title text)
+            div.listing-item__info
+              span.listing-item__info--item-company (employer)
+              span.listing-item__info--item-location (location)
+            span.listing-item__employment-type (job type)
+            div.listing-item__date (posted date)
+            div.listing-item__desc (description snippet)
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # EnvironmentalCareer job listing selectors
-        job_cards = (
-            soup.find_all("div", class_="job")
-            or soup.find_all("article", class_="job-listing")
-            or soup.find_all("li", class_="job-item")
-        )
-
-        if not job_cards:
-            logger.warning("No job cards found - page structure may have changed")
+        job_elements = soup.find_all("article", class_="listing-item")
+        if not job_elements:
+            logger.warning("EnvironmentalCareer: No article.listing-item elements found")
             return jobs
 
-        for card in job_cards:
+        for element in job_elements:
             try:
-                # Extract job link
-                job_link = card.find("a", class_="title") or card.find("a", href=True)
-                if not job_link:
+                # Title + URL from div.listing-item__title > a
+                title_div = element.find("div", class_="listing-item__title")
+                if not title_div:
+                    continue
+                link = title_div.find("a", class_="link")
+                if not link or not link.get("href"):
                     continue
 
-                url = job_link.get("href", "")
+                title = link.get_text(strip=True)
+                url = link["href"]
                 if not url.startswith("http"):
-                    url = f"https://www.environmentalcareer.com{url}"
+                    url = f"https://environmentalcareer.com{url}"
 
-                # Extract unique ID from URL
-                source_id = url.split("/")[-1] if "/" in url else url
+                # Job ID from URL (e.g., "/job/81723/title/" -> "81723")
+                url_parts = url.split("/")
+                source_id = url_parts[4] if len(url_parts) > 4 else str(hash(url) % 1000000)
                 job_id = f"envcareer_{source_id}"
 
-                # Title
-                title = job_link.get_text(strip=True) or "Unknown Title"
+                # Employer and location from div.listing-item__info
+                employer = "Unknown Employer"
+                location_text = None
+                info_div = element.find("div", class_="listing-item__info")
+                if info_div:
+                    company_span = info_div.find("span", class_="listing-item__info--item-company")
+                    if company_span:
+                        employer = company_span.get_text(strip=True)
+                    location_span = info_div.find("span", class_="listing-item__info--item-location")
+                    if location_span:
+                        location_text = location_span.get_text(strip=True)
 
-                # Employer
-                employer_elem = card.find("span", class_="employer") or card.find(
-                    "div", class_="company"
-                ) or card.find("a", class_="company")
-                employer = (
-                    employer_elem.get_text(strip=True)
-                    if employer_elem
-                    else "Unknown Employer"
-                )
+                # Parse location
+                location_city, location_state, remote = self._parse_location(location_text)
 
-                # Location
-                location_elem = card.find("span", class_="location") or card.find(
-                    "div", class_="location"
-                )
-                location = (
-                    location_elem.get_text(strip=True) if location_elem else None
-                )
-                location_city, location_state, remote = self._parse_location(location)
-
-                # Description
-                desc_elem = card.find("div", class_="description") or card.find(
-                    "p", class_="snippet"
-                ) or card.find("p")
-                description = (
-                    desc_elem.get_text(strip=True)
-                    if desc_elem
-                    else "No description available"
-                )
-
-                # Job type
-                job_type_elem = card.find("span", class_="type")
+                # Job type from span.listing-item__employment-type
+                job_type_elem = element.find("span", class_="listing-item__employment-type")
                 job_type = (
                     self._normalize_job_type(job_type_elem.get_text(strip=True))
                     if job_type_elem
                     else "full-time"
                 )
 
-                # Posted date
-                date_elem = card.find("time") or card.find("span", class_="posted")
+                # Posted date from div.listing-item__date
+                date_elem = element.find("div", class_="listing-item__date")
                 posted_date = self._parse_date(
                     date_elem.get_text(strip=True) if date_elem else None
                 )
 
-                # Salary
-                salary_elem = card.find("span", class_="salary")
-                salary_range = (
-                    salary_elem.get_text(strip=True) if salary_elem else None
+                # Description from div.listing-item__desc
+                desc_elem = element.find("div", class_="listing-item__desc")
+                description = (
+                    desc_elem.get_text(strip=True)
+                    if desc_elem
+                    else f"{title} at {employer}"
                 )
 
                 jobs.append(
@@ -138,18 +122,20 @@ class EnvironmentalCareer(BaseScraper):
                         employer=employer,
                         location_city=location_city,
                         location_state=location_state,
+                        location_country="USA",
                         remote=remote,
                         description=description,
-                        salary_range=salary_range,
+                        salary_range=None,
                         job_type=job_type,
                         posted_date=posted_date,
+                        application_deadline=None,
                         url=url,
                         source=self.scraper_id,
                     )
                 )
 
             except Exception as e:
-                logger.warning("Failed to parse job card: %s", e)
+                logger.error("Error parsing EnvironmentalCareer job: %s", e)
                 continue
 
         logger.info("Parsed %d jobs from EnvironmentalCareer", len(jobs))

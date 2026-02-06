@@ -1,3 +1,6 @@
+# NOTE: This page does not contain job listings. It has news/feature articles about careers.
+# NOAA jobs are posted on USAJOBS.gov, which is already covered by usajobs_scraper.py.
+# This scraper is kept for compatibility but will return empty results.
 """
 NOAA Fisheries careers page scraper (HTML).
 
