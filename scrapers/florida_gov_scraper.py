@@ -1,19 +1,20 @@
-# NOTE: The URL https://myfwc.com/about/overview/careers returns 404.
-# Florida FWC careers page may have moved. This scraper will fail.
-# Consider checking https://myfwc.com or https://jobs.myflorida.com for the correct URL.
-
 """
 Florida government marine careers scraper.
 
-Scrapes https://myfwc.com/about/overview/careers (Florida Fish & Wildlife)
-for state marine biology jobs. Uses HTML parsing with BeautifulSoup4.
+Florida FWC careers page at https://myfwc.com/get-involved/employment/careers/
+redirects to the state job portal at jobs.myflorida.com for actual job listings.
+
+This scraper uses the state job portal's FWC-filtered search.
+
+Flow:
+1. Fetch jobs.myflorida.com with FWC filter
+2. Parse job listings (if HTML-based) or handle redirect
+3. Extract job details and create Job objects
 """
 
 import logging
-from datetime import datetime
 
-from bs4 import BeautifulSoup
-
+from core.exceptions import ScraperError
 from core.schemas import Job
 from scrapers.base_scraper import BaseScraper
 from scrapers.scraper_manager import register_scraper
@@ -23,96 +24,125 @@ logger = logging.getLogger(__name__)
 
 @register_scraper
 class FloridaGovScraper(BaseScraper):
-    """Scraper for Florida Fish & Wildlife Conservation Commission job listings."""
+    """
+    Scraper for Florida Fish & Wildlife Conservation Commission job listings.
+
+    FWC jobs are hosted on the state job portal at jobs.myflorida.com.
+    The site appears to use a complex JavaScript-based ATS system.
+    """
 
     scraper_id = "florida_gov"
 
     def search(self, query_params: dict | None = None) -> str:
         """
-        Fetch the Florida FWC careers page.
+        Fetch the Florida state jobs portal filtered for FWC positions.
 
-        Returns raw HTML.
+        URL: https://jobs.myflorida.com/search/?searchby=location&createNewAlert=false&q=FWC
         """
-        url = "https://myfwc.com/about/overview/careers"
-        response = self.fetch(url)
+        url = "https://jobs.myflorida.com/search/"
+        params = {
+            "searchby": "location",
+            "createNewAlert": "false",
+            "q": "FWC",
+        }
+
+        if query_params:
+            params.update(query_params)
+
+        logger.info("Fetching Florida FWC jobs from state portal")
+        response = self.fetch(url, params=params)
         return response.text
 
     def parse(self, raw_data: str) -> list[Job]:
         """
-        Parse Florida FWC HTML to extract job listings.
+        Parse Florida state jobs portal HTML to extract FWC job listings.
 
-        Expected structure: job cards with title, location, description.
-        Handle missing fields gracefully.
+        The portal uses table rows with class="data-row" for job listings.
+        Each row contains title, location, and posted date in specific columns.
         """
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # Look for job listings
-        job_cards = soup.find_all("div", class_=lambda x: x and "job" in x.lower()) or \
-                    soup.find_all("li", class_=lambda x: x and "job" in x.lower()) or \
-                    soup.find_all("article") or \
-                    soup.find_all("div", class_="position") or \
-                    soup.find_all("tr", class_=lambda x: x and "job" in x.lower())
+        # Jobs are in table rows with data-row class
+        job_rows = soup.find_all("tr", class_="data-row")
 
-        for idx, card in enumerate(job_cards):
+        if not job_rows:
+            logger.warning("No job rows found - portal structure may have changed")
+            return jobs
+
+        for idx, row in enumerate(job_rows):
             try:
-                # Extract title
-                title_elem = card.find("h2") or card.find("h3") or card.find("h4") or \
-                             card.find("a", class_=lambda x: x and "title" in x.lower()) or \
-                             card.find("a")
-                if not title_elem:
-                    continue
-                title = title_elem.get_text(strip=True)
-
-                # Skip if title suggests external link
-                if "peopleFirst" in title or "state personnel" in title.lower():
+                # Extract title and URL from td.colTitle > span.jobTitle > a
+                title_cell = row.find("td", class_="colTitle")
+                if not title_cell:
                     continue
 
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if link_elem:
-                    url = link_elem["href"]
-                    if not url.startswith("http"):
-                        url = f"https://myfwc.com{url}"
-                else:
-                    url = "https://myfwc.com/about/overview/careers"
+                title_link = title_cell.find("a", class_="jobTitle-link")
+                if not title_link:
+                    continue
 
-                # Extract location (default to Florida if not specified)
-                location_elem = card.find(class_=lambda x: x and "location" in x.lower()) or \
-                               card.find("span", string=lambda s: s and ("location" in s.lower() if s else False))
-                location_text = location_elem.get_text(strip=True) if location_elem else None
+                title = title_link.get_text(strip=True)
+                url = title_link.get("href", "")
+                if url and not url.startswith("http"):
+                    url = f"https://jobs.myflorida.com{url}"
 
-                city, state = None, "FL"
+                # Extract location from td.colLocation
+                location_cell = row.find("td", class_="colLocation")
+                location_text = location_cell.get_text(strip=True) if location_cell else None
+
+                city = None
+                state = "FL"
                 remote = False
+
                 if location_text:
                     remote = "remote" in location_text.lower()
-                    parts = location_text.split(",")
-                    if len(parts) >= 1:
-                        city = parts[0].strip()
-                    if len(parts) >= 2:
-                        state = parts[1].strip()
+                    # Location format is typically "CITY-STATE-ZIP" or "CITY, FL"
+                    location_text = location_text.replace("-FL-", ", FL,")
+                    parts = [p.strip() for p in location_text.split(",")]
+                    if parts:
+                        city = parts[0]
+                    if len(parts) > 1:
+                        state = parts[1]
 
-                # Extract description
-                desc_elem = card.find("p") or card.find(class_="description") or \
-                           card.find(class_="summary")
-                description = desc_elem.get_text(strip=True) if desc_elem else title
+                # Extract posted date from td.colDate
+                date_cell = row.find("td", class_="colDate")
+                posted_date = None
+                if date_cell:
+                    date_text = date_cell.get_text(strip=True)
+                    # Try to parse date
+                    from datetime import datetime
+                    for fmt in ["%m/%d/%Y", "%Y-%m-%d", "%b %d, %Y"]:
+                        try:
+                            posted_date = datetime.strptime(date_text, fmt)
+                            break
+                        except ValueError:
+                            continue
 
-                # Extract job type
-                type_elem = card.find(class_=lambda x: x and "type" in x.lower())
-                job_type_text = type_elem.get_text(strip=True).lower() if type_elem else "full-time"
-                if "intern" in job_type_text:
+                # Description is not in the table, use title for now
+                description = f"Florida FWC position: {title}"
+
+                # Determine job type from title
+                job_type = "full-time"
+                title_lower = title.lower()
+                if "intern" in title_lower:
                     job_type = "internship"
-                elif "volunteer" in job_type_text:
+                elif "volunteer" in title_lower:
                     job_type = "volunteer"
-                elif "part" in job_type_text:
+                elif "part-time" in title_lower or "part time" in title_lower:
                     job_type = "part-time"
-                elif "seasonal" in job_type_text:
+                elif "seasonal" in title_lower or "temporary" in title_lower or "temp" in title_lower:
                     job_type = "seasonal"
+
+                # Generate unique job ID from URL or index
+                if url:
+                    url_parts = url.split("/")
+                    source_id = url_parts[-2] if len(url_parts) > 1 else str(idx)
                 else:
-                    job_type = "full-time"
+                    source_id = str(idx)
 
                 job = Job(
-                    job_id=f"{self.scraper_id}_{idx}",
+                    job_id=f"{self.scraper_id}_{source_id}",
                     title=title,
                     employer="Florida Fish & Wildlife Conservation Commission",
                     location_city=city,
@@ -123,7 +153,7 @@ class FloridaGovScraper(BaseScraper):
                     requirements=[],
                     salary_range=None,
                     job_type=job_type,
-                    posted_date=None,
+                    posted_date=posted_date,
                     application_deadline=None,
                     url=url,
                     source=self.scraper_id,
@@ -131,7 +161,7 @@ class FloridaGovScraper(BaseScraper):
                 jobs.append(job)
 
             except Exception as e:
-                logger.warning("Failed to parse Florida FWC job card %d: %s", idx, e)
+                logger.warning("Failed to parse Florida FWC job row %d: %s", idx, e)
                 continue
 
         logger.info("Florida Gov scraper found %d jobs", len(jobs))

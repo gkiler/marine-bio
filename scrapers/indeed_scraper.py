@@ -1,15 +1,15 @@
 """
 Indeed scraper - indeed.com (search: "marine biology")
 
-NOTE: This site requires JavaScript rendering. Job listings are dynamically loaded
-and not present in the static HTML. Indeed also implements aggressive bot detection.
-Selectors below are best-guess patterns and will not work without a JavaScript-enabled
-browser/scraper (e.g., Playwright, Selenium) and may require proxy/anti-detection measures.
+Works with browser-like HTTP headers (no JavaScript needed).
+Requires Sec-Fetch-* and Sec-Ch-Ua headers to avoid 403 blocks.
 
 Flow:
 1. Fetch Indeed job search page with marine biology keywords
-2. Parse job listings from HTML using BeautifulSoup
-3. Extract job details and create Job objects
+2. Parse job cards from div.job_seen_beacon elements
+3. Extract details via data-testid attributes and create Job objects
+
+Verified working: 2026-02-12 (16 jobs returned with browser headers)
 """
 
 import logging
@@ -38,7 +38,7 @@ class Indeed(BaseScraper):
         """
         url = "https://www.indeed.com/jobs"
         params = {
-            "q": "marine biology oceanography aquatic",
+            "q": '"marine biology" OR "marine biologist" OR oceanography OR "marine science"',
             "l": "",  # location (empty for all US)
             "sort": "date",
         }
@@ -103,11 +103,11 @@ class Indeed(BaseScraper):
                 else:
                     title = "Unknown Title"
 
-                # Employer
+                # Employer — data-testid attribute is the reliable selector
                 employer_elem = (
-                    card.find("span", class_="companyName")
+                    card.find("span", attrs={"data-testid": "company-name"})
+                    or card.find("span", class_="companyName")
                     or card.find("span", class_="company")
-                    or card.find("div", class_="company")
                 )
                 employer = (
                     employer_elem.get_text(strip=True)
@@ -115,11 +115,11 @@ class Indeed(BaseScraper):
                     else "Unknown Employer"
                 )
 
-                # Location
+                # Location — data-testid attribute is the reliable selector
                 location_elem = (
-                    card.find("div", class_="companyLocation")
+                    card.find("div", attrs={"data-testid": "text-location"})
+                    or card.find("div", class_="companyLocation")
                     or card.find("span", class_="location")
-                    or card.find("div", class_="location")
                 )
                 location = (
                     location_elem.get_text(strip=True) if location_elem else None
@@ -204,7 +204,11 @@ class Indeed(BaseScraper):
 
         parts = [p.strip() for p in location.split(",")]
         city = parts[0] if parts else None
-        state = parts[1] if len(parts) > 1 else None
+        state = None
+        if len(parts) > 1:
+            # Strip zip codes and parenthetical area info: "WA 98226" -> "WA"
+            state_raw = parts[1].split("(")[0].strip()
+            state = state_raw.split()[0] if state_raw else None
 
         return city, state, remote
 

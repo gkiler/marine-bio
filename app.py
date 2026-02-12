@@ -15,12 +15,10 @@ from scrapers.scraper_manager import run_all_scrapers, SCRAPER_REGISTRY
 # Import all scrapers so they self-register via @register_scraper
 from scrapers import (  # noqa: F401
     usajobs_scraper,
-    noaa_scraper,
     conservation_scraper,
     bluejobs_scraper,
     schmidt_scraper,
     climatebase_scraper,
-    tamu_scraper,
     sevenseas_scraper,
     wiseoceans_scraper,
     aza_scraper,
@@ -30,7 +28,6 @@ from scrapers import (  # noqa: F401
     scripps_scraper,
     mbari_scraper,
     afs_scraper,
-    esa_scraper,
     aslo_scraper,
     smm_scraper,
     oceana_scraper,
@@ -40,7 +37,6 @@ from scrapers import (  # noqa: F401
     wcs_scraper,
     epa_scraper,
     boem_scraper,
-    nps_scraper,
     florida_gov_scraper,
     nature_careers_scraper,
     science_careers_scraper,

@@ -1,18 +1,21 @@
 """
 Society for Marine Mammalogy job scraper.
 
-Scrapes: https://www.marinemammalscience.org/job-board
+DISABLED: SMM job board has moved to:
+https://marinemammalscience.org/professional-development/marine-mammal-science-job-openings/
 
-NOTE: This URL returns 404. The /job-board page does not exist.
-The organization may have moved or discontinued their job board.
-Selectors are best-guess patterns.
+The page contains a search form that loads jobs dynamically via JavaScript.
+Jobs are not present in the initial HTML response and require form submission
+or JavaScript execution to display.
+
+To re-enable this scraper, you would need to use a JavaScript-capable scraper
+like Playwright or Selenium, or reverse-engineer the backend API that the form
+calls to fetch job data.
 """
 
 import logging
-from datetime import datetime
 
-from bs4 import BeautifulSoup
-
+from core.exceptions import ScraperError
 from core.schemas import Job
 from scrapers.base_scraper import BaseScraper
 from scrapers.scraper_manager import register_scraper
@@ -25,153 +28,19 @@ class SMMScraper(BaseScraper):
     """
     Scraper for Society for Marine Mammalogy job board.
 
-    Flow:
-    1. Fetch job board page
-    2. Parse marine mammal science positions
-    3. Extract job details and application links
+    DISABLED: Requires JavaScript rendering (dynamic job loading via form).
     """
 
     scraper_id = "smm"
 
     def search(self, query_params: dict | None = None) -> str:
-        """Fetch SMM job board HTML."""
-        url = "https://www.marinemammalscience.org/job-board"
-        response = self.fetch(url)
-        return response.text
-
-    def parse(self, raw_data: str) -> list[Job]:
-        """
-        Parse SMM job listings from HTML.
-
-        Extracts marine mammal science positions.
-        Handles missing fields gracefully.
-        """
-        soup = BeautifulSoup(raw_data, "lxml")
-        jobs = []
-
-        # Look for job listing patterns
-        job_cards = (
-            soup.find_all("div", class_=lambda x: x and ("job" in x.lower() or "posting" in x.lower() or "listing" in x.lower()) if x else False)
-            or soup.find_all("tr", class_=lambda x: x and ("job" in x.lower() or "row" in x.lower()) if x else False)
-            or soup.find_all("li", class_=lambda x: x and ("job" in x.lower() or "position" in x.lower()) if x else False)
-            or soup.find_all("article")
+        """Raise error - scraper disabled."""
+        raise ScraperError(
+            scraper_id=self.scraper_id,
+            message="Job board requires JavaScript rendering for dynamic job loading",
+            url="https://marinemammalscience.org/professional-development/marine-mammal-science-job-openings/"
         )
 
-        for idx, card in enumerate(job_cards):
-            try:
-                # Extract title
-                title_elem = (
-                    card.find("h2")
-                    or card.find("h3")
-                    or card.find("h4")
-                    or card.find("a", class_=lambda x: x and "title" in x.lower() if x else False)
-                )
-                if not title_elem:
-                    continue
-
-                title = title_elem.get_text(strip=True)
-
-                # Skip if not a job title
-                if len(title) < 5 or title.lower() in ["job board", "jobs"]:
-                    continue
-
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if link_elem:
-                    url = link_elem["href"]
-                    if not url.startswith("http"):
-                        url = f"https://www.marinemammalscience.org{url}"
-                else:
-                    url = "https://www.marinemammalscience.org/job-board"
-
-                # Extract employer
-                employer_elem = (
-                    card.find(class_=lambda x: x and ("employer" in x.lower() or "company" in x.lower() or "organization" in x.lower() or "institution" in x.lower()) if x else False)
-                    or card.find("strong")
-                )
-                employer = employer_elem.get_text(strip=True) if employer_elem else "Marine Mammal Research Organization"
-
-                # Extract location
-                location_elem = card.find(class_=lambda x: x and "location" in x.lower() if x else False)
-                location_text = location_elem.get_text(strip=True) if location_elem else None
-
-                location_city = None
-                location_state = None
-                remote = False
-
-                if location_text:
-                    if "remote" in location_text.lower():
-                        remote = True
-                    parts = [p.strip() for p in location_text.replace("Remote", "").split(",")]
-                    parts = [p for p in parts if p]
-                    if len(parts) >= 2:
-                        location_city = parts[0]
-                        location_state = parts[1]
-                    elif len(parts) == 1 and parts[0]:
-                        location_state = parts[0]
-
-                # Extract description
-                description_elem = (
-                    card.find("p")
-                    or card.find("div", class_=lambda x: x and "description" in x.lower() if x else False)
-                )
-                description = description_elem.get_text(strip=True) if description_elem else f"Marine mammal science position. {title}"
-
-                # Extract posted date if available
-                date_elem = card.find(class_=lambda x: x and ("date" in x.lower() or "posted" in x.lower()) if x else False)
-                posted_date = None
-                if date_elem:
-                    try:
-                        date_text = date_elem.get_text(strip=True)
-                        # Common date formats - adjust based on actual format
-                        for fmt in ["%m/%d/%Y", "%Y-%m-%d", "%B %d, %Y"]:
-                            try:
-                                posted_date = datetime.strptime(date_text, fmt)
-                                break
-                            except ValueError:
-                                continue
-                    except Exception:
-                        posted_date = None
-
-                # Determine job type
-                job_type = "full-time"
-                title_lower = title.lower()
-                desc_lower = description.lower()
-
-                if "intern" in title_lower or "intern" in desc_lower:
-                    job_type = "internship"
-                elif "postdoc" in title_lower or "postdoc" in desc_lower or "fellow" in title_lower:
-                    job_type = "full-time"
-                elif "volunteer" in title_lower or "volunteer" in desc_lower:
-                    job_type = "volunteer"
-                elif "part-time" in title_lower or "part time" in title_lower:
-                    job_type = "part-time"
-                elif "seasonal" in title_lower or "seasonal" in desc_lower:
-                    job_type = "seasonal"
-
-                job = Job(
-                    job_id=f"smm_{idx}_{hash(url) % 100000}",
-                    title=title,
-                    employer=employer,
-                    location_city=location_city,
-                    location_state=location_state,
-                    location_country="USA",
-                    remote=remote,
-                    description=description,
-                    requirements=[],
-                    salary_range=None,
-                    job_type=job_type,
-                    posted_date=posted_date,
-                    application_deadline=None,
-                    url=url,
-                    source=self.scraper_id,
-                )
-
-                jobs.append(job)
-
-            except Exception as e:
-                logger.warning("Failed to parse SMM job card %d: %s", idx, e)
-                continue
-
-        logger.info("SMM scraper parsed %d jobs", len(jobs))
-        return jobs
+    def parse(self, raw_data: str) -> list[Job]:
+        """Disabled - always returns empty list."""
+        return []

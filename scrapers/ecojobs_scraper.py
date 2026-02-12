@@ -1,12 +1,13 @@
 """
 EcoJobs scraper - ecojobs.com
 
-NOTE: This site requires JavaScript rendering. Job listings are dynamically loaded
-and not present in the static HTML. Selectors below are best-guess patterns and will
-not work without a JavaScript-enabled browser/scraper (e.g., Playwright, Selenium).
+Scrapes: https://ecojobs.com/natural-resources-and-conservation-jobs/
+
+EcoJobs uses WordPress with Content Views plugin (pt-cv-* classes).
+Job listings are in static HTML with pt-cv-content-item divs.
 
 Flow:
-1. Fetch EcoJobs search page
+1. Fetch EcoJobs Natural Resources & Conservation category page
 2. Parse job listings from HTML using BeautifulSoup
 3. Extract job details and create Job objects
 """
@@ -31,103 +32,90 @@ class EcoJobs(BaseScraper):
 
     def search(self, query_params: dict | None = None) -> str:
         """
-        Fetch EcoJobs job listings page.
+        Fetch EcoJobs Natural Resources & Conservation category page.
 
         Returns HTML string of the job search results.
         """
-        url = "https://www.ecojobs.com/search"
-        params = {
-            "q": "marine oceanography aquatic conservation",
-            "l": "",  # location (empty for all)
-        }
+        # Use the Natural Resources & Conservation category which includes marine jobs
+        url = "https://ecojobs.com/natural-resources-and-conservation-jobs/"
 
-        if query_params:
-            params.update(query_params)
-
-        logger.info("Fetching EcoJobs with params: %s", params)
-        response = self.fetch(url, params=params)
+        logger.info("Fetching EcoJobs Natural Resources jobs")
+        response = self.fetch(url)
         return response.text
 
     def parse(self, raw_data: str) -> list[Job]:
         """
         Parse EcoJobs HTML into Job objects.
 
-        Handles missing fields gracefully by setting to None.
+        EcoJobs uses Content Views plugin with pt-cv-content-item divs.
+        Each job has title in h4.pt-cv-title and location in pt-cv-custom-fields.
         """
         soup = BeautifulSoup(raw_data, "lxml")
         jobs = []
 
-        # EcoJobs typically uses div or article tags for job listings
-        job_cards = (
-            soup.find_all("div", class_="job-listing")
-            or soup.find_all("article", class_="job")
-            or soup.find_all("div", class_="job-card")
-        )
+        # EcoJobs uses Content Views plugin with pt-cv-content-item class
+        job_cards = soup.find_all("div", class_="pt-cv-content-item")
 
         if not job_cards:
             logger.warning("No job cards found - page structure may have changed")
             return jobs
 
-        for card in job_cards:
+        for idx, card in enumerate(job_cards):
             try:
-                # Extract job link
-                job_link = card.find("a", class_="job-link") or card.find("a", href=True)
-                if not job_link:
+                # Extract title and URL from h4.pt-cv-title > a
+                title_elem = card.find("h4", class_="pt-cv-title")
+                if not title_elem:
                     continue
 
-                url = job_link.get("href", "")
-                if not url.startswith("http"):
-                    url = f"https://www.ecojobs.com{url}"
+                link = title_elem.find("a", href=True)
+                if not link:
+                    continue
+
+                title = link.get_text(strip=True)
+                url = link["href"]
 
                 # Extract unique ID from URL
-                source_id = url.split("/")[-1] if "/" in url else url
+                url_parts = url.rstrip("/").split("/")
+                source_id = url_parts[-1] if url_parts else str(idx)
                 job_id = f"ecojobs_{source_id}"
 
-                # Title
-                title_elem = card.find("h2") or card.find("h3") or job_link
-                title = title_elem.get_text(strip=True) if title_elem else "Unknown Title"
+                # Extract location from custom fields
+                location_elem = card.find(
+                    "div", class_="pt-cv-ctf-_job_location"
+                )
+                location = location_elem.get_text(strip=True) if location_elem else None
+                location_city, location_state, remote = self._parse_location(location)
 
-                # Employer
-                employer_elem = card.find("span", class_="company") or card.find(
-                    "div", class_="company"
-                ) or card.find("p", class_="employer")
+                # Extract employer from custom fields (if present)
+                employer_elem = card.find("div", class_="pt-cv-ctf-_company_name")
                 employer = (
                     employer_elem.get_text(strip=True)
                     if employer_elem
-                    else "Unknown Employer"
+                    else "See job posting"
                 )
 
-                # Location
-                location_elem = card.find("span", class_="location") or card.find(
-                    "div", class_="location"
-                )
-                location = (
-                    location_elem.get_text(strip=True) if location_elem else None
-                )
-                location_city, location_state, remote = self._parse_location(location)
-
-                # Description
-                desc_elem = card.find("div", class_="description") or card.find(
-                    "p", class_="summary"
-                ) or card.find("p")
+                # Extract description from content area
+                desc_elem = card.find("div", class_="pt-cv-content")
                 description = (
                     desc_elem.get_text(strip=True)
                     if desc_elem
-                    else "No description available"
+                    else title
                 )
 
-                # Job type
-                job_type_elem = card.find("span", class_="job-type") or card.find(
-                    "span", class_="type"
-                )
-                job_type = (
-                    self._normalize_job_type(job_type_elem.get_text(strip=True))
-                    if job_type_elem
-                    else "full-time"
-                )
+                # Job type - infer from title/description
+                job_type = "full-time"
+                title_lower = title.lower()
+                if "intern" in title_lower or "intern" in description.lower():
+                    job_type = "internship"
+                elif "volunteer" in title_lower or "volunteer" in description.lower():
+                    job_type = "volunteer"
+                elif "part-time" in title_lower or "part time" in title_lower:
+                    job_type = "part-time"
+                elif "seasonal" in title_lower or "seasonal" in description.lower():
+                    job_type = "seasonal"
 
-                # Posted date
-                date_elem = card.find("time") or card.find("span", class_="date")
+                # Posted date - try to extract from pt-cv-ctf-post_date or similar
+                date_elem = card.find("div", class_=lambda x: x and "date" in x.lower() if x else False)
                 posted_date = self._parse_date(
                     date_elem.get_text(strip=True) if date_elem else None
                 )
@@ -149,7 +137,7 @@ class EcoJobs(BaseScraper):
                 )
 
             except Exception as e:
-                logger.warning("Failed to parse job card: %s", e)
+                logger.warning("Failed to parse EcoJobs card %d: %s", idx, e)
                 continue
 
         logger.info("Parsed %d jobs from EcoJobs", len(jobs))

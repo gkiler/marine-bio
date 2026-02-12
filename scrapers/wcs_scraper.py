@@ -1,19 +1,23 @@
-# NOTE: WCS uses Brass Ring (IBM Kenexa) external job board.
-# Jobs are hosted at https://sjobs.brassring.com/... and require JavaScript.
-# This scraper will return 0 jobs. Consider using Selenium or API integration.
-
 """
 Wildlife Conservation Society careers scraper.
 
-Scrapes https://www.wcs.org/about-us/careers for conservation jobs.
-Uses HTML parsing with BeautifulSoup4.
+BLOCKED: WCS uses IBM Kenexa BrassRing applicant tracking system with Angular-based
+job rendering. The static HTML contains Angular templates ({{job.Link}}, ng-* attributes)
+and placeholders, but no actual job content.
+
+This scraper is disabled and will return 0 jobs until a JavaScript-enabled solution
+(Playwright, Selenium) is implemented.
+
+Verified blocking on 2026-02-12:
+- Site uses BrassRing ATS (sjobs.brassring.com)
+- Angular templates throughout (e.g., {{job.Link}}, ng-controller)
+- 29 job-related divs but all contain template syntax, not actual data
+- Jobs load dynamically after Angular initializes
 """
 
 import logging
-from datetime import datetime
 
-from bs4 import BeautifulSoup
-
+from core.exceptions import ScraperError
 from core.schemas import Job
 from scrapers.base_scraper import BaseScraper
 from scrapers.scraper_manager import register_scraper
@@ -23,109 +27,34 @@ logger = logging.getLogger(__name__)
 
 @register_scraper
 class WcsScraper(BaseScraper):
-    """Scraper for Wildlife Conservation Society job listings."""
+    """
+    Scraper for Wildlife Conservation Society job listings.
+
+    Currently disabled due to BrassRing Angular rendering.
+    """
 
     scraper_id = "wcs"
 
     def search(self, query_params: dict | None = None) -> str:
         """
-        Fetch the WCS careers page.
+        WCS uses IBM Kenexa BrassRing ATS that requires JavaScript execution.
 
-        Returns raw HTML.
+        Raises ScraperError to indicate the site is not scrapable without JS.
         """
-        url = "https://www.wcs.org/about-us/careers"
-        response = self.fetch(url)
-        return response.text
+        logger.warning(
+            "WCS scraper is disabled: site uses IBM Kenexa BrassRing ATS with Angular "
+            "that renders all content client-side. Requires JavaScript-enabled browser (Playwright/Selenium)."
+        )
+        raise ScraperError(
+            self.scraper_id,
+            "Site requires JavaScript execution - IBM Kenexa BrassRing ATS with Angular",
+            "https://sjobs.brassring.com/TGnewUI/Search/Home/Home?partnerid=25965&siteid=5168",
+        )
 
     def parse(self, raw_data: str) -> list[Job]:
         """
-        Parse WCS HTML to extract job listings.
+        Not implemented - site requires JavaScript.
 
-        Expected structure: job cards with title, location, description.
-        Handle missing fields gracefully.
+        This method will never be called since search() raises an error.
         """
-        soup = BeautifulSoup(raw_data, "lxml")
-        jobs = []
-
-        # Look for job listings
-        job_cards = soup.find_all("div", class_=lambda x: x and "job" in x.lower()) or \
-                    soup.find_all("li", class_=lambda x: x and "job" in x.lower()) or \
-                    soup.find_all("article") or \
-                    soup.find_all("tr", class_=lambda x: x and "job" in x.lower())
-
-        for idx, card in enumerate(job_cards):
-            try:
-                # Extract title
-                title_elem = card.find("h2") or card.find("h3") or card.find("h4") or \
-                             card.find("a", class_=lambda x: x and "title" in x.lower()) or \
-                             card.find("a")
-                if not title_elem:
-                    continue
-                title = title_elem.get_text(strip=True)
-
-                # Extract URL
-                link_elem = card.find("a", href=True)
-                if link_elem:
-                    url = link_elem["href"]
-                    if not url.startswith("http"):
-                        url = f"https://www.wcs.org{url}"
-                else:
-                    url = "https://www.wcs.org/about-us/careers"
-
-                # Extract location
-                location_elem = card.find(class_=lambda x: x and "location" in x.lower()) or \
-                               card.find("span", string=lambda s: s and ("location" in s.lower() if s else False))
-                location_text = location_elem.get_text(strip=True) if location_elem else None
-
-                city, state = None, None
-                remote = False
-                if location_text:
-                    remote = "remote" in location_text.lower()
-                    parts = location_text.split(",")
-                    if len(parts) >= 1:
-                        city = parts[0].strip()
-                    if len(parts) >= 2:
-                        state = parts[1].strip()
-
-                # Extract description
-                desc_elem = card.find("p") or card.find(class_="description") or \
-                           card.find(class_="summary")
-                description = desc_elem.get_text(strip=True) if desc_elem else title
-
-                # Extract job type
-                type_elem = card.find(class_=lambda x: x and "type" in x.lower())
-                job_type_text = type_elem.get_text(strip=True).lower() if type_elem else "full-time"
-                if "intern" in job_type_text:
-                    job_type = "internship"
-                elif "volunteer" in job_type_text:
-                    job_type = "volunteer"
-                elif "part" in job_type_text:
-                    job_type = "part-time"
-                else:
-                    job_type = "full-time"
-
-                job = Job(
-                    job_id=f"{self.scraper_id}_{idx}",
-                    title=title,
-                    employer="Wildlife Conservation Society",
-                    location_city=city,
-                    location_state=state,
-                    location_country="USA",
-                    remote=remote,
-                    description=description,
-                    requirements=[],
-                    salary_range=None,
-                    job_type=job_type,
-                    posted_date=None,
-                    application_deadline=None,
-                    url=url,
-                    source=self.scraper_id,
-                )
-                jobs.append(job)
-
-            except Exception as e:
-                logger.warning("Failed to parse WCS job card %d: %s", idx, e)
-                continue
-
-        logger.info("WCS scraper found %d jobs", len(jobs))
-        return jobs
+        return []
