@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 30
     max_retries: int = 3
     retry_backoff_seconds: float = 2.0
+    playwright_timeout: int = 30000  # ms — timeout for Playwright page loads
 
     # Gemini classifier
     gemini_model: str = "gemini-3-flash-preview"

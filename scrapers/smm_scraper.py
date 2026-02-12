@@ -1,16 +1,18 @@
 """
 Society for Marine Mammalogy job scraper.
 
-DISABLED: SMM job board has moved to:
-https://marinemammalscience.org/professional-development/marine-mammal-science-job-openings/
+BLOCKED: SMM job board uses a form-based search. The page renders static
+instructional text ("To browse all jobs, simply hit the Search Button")
+but actual job listings only appear after submitting the search form.
 
-The page contains a search form that loads jobs dynamically via JavaScript.
-Jobs are not present in the initial HTML response and require form submission
-or JavaScript execution to display.
+Tested 2026-02-12 with Playwright:
+- Rendered 56k chars but no job listing elements in DOM
+- Found 2 forms and a submit button ("Search >")
+- Clicking submit yields 0 headings/job elements in response
+- May require specific form field values or membership access
 
-To re-enable this scraper, you would need to use a JavaScript-capable scraper
-like Playwright or Selenium, or reverse-engineer the backend API that the form
-calls to fetch job data.
+This scraper remains disabled. To re-enable, reverse-engineer the form
+submission or implement Playwright form interaction in search().
 """
 
 import logging
@@ -28,19 +30,19 @@ class SMMScraper(BaseScraper):
     """
     Scraper for Society for Marine Mammalogy job board.
 
-    DISABLED: Requires JavaScript rendering (dynamic job loading via form).
+    Disabled: requires form interaction to load job listings.
     """
 
     scraper_id = "smm"
 
     def search(self, query_params: dict | None = None) -> str:
-        """Raise error - scraper disabled."""
+        """Disabled — requires form submission to load jobs."""
         raise ScraperError(
-            scraper_id=self.scraper_id,
-            message="Job board requires JavaScript rendering for dynamic job loading",
-            url="https://marinemammalscience.org/professional-development/marine-mammal-science-job-openings/"
+            self.scraper_id,
+            "Job board requires form submission to load listings",
+            "https://marinemammalscience.org/professional-development/marine-mammal-science-job-openings/",
         )
 
     def parse(self, raw_data: str) -> list[Job]:
-        """Disabled - always returns empty list."""
+        """Not implemented — search() raises."""
         return []

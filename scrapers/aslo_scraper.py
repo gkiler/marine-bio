@@ -1,13 +1,17 @@
 """
 Association for the Sciences of Limnology and Oceanography job scraper.
 
-DISABLED: ASLO job board has moved to a JavaScript-based MemberSuite platform
-at http://aslo.users.membersuite.com/community/career-center/browse-jobs/
-which requires JavaScript rendering to display job listings. The page returns
-static HTML with no job data in the initial response.
+BLOCKED: ASLO career center is on MemberSuite platform which renders a
+generic "Member Portal" landing page. No job content is visible without
+what appears to be membership authentication.
 
-To re-enable this scraper, you would need to use a JavaScript-capable scraper
-like Playwright or Selenium.
+Tested 2026-02-12 with Playwright:
+- Rendered 503k chars but page shows only "Welcome!" and meeting info
+- No job-related links or content anywhere in DOM
+- Cookie consent overlay present
+- Likely requires membership login to access career center
+
+This scraper remains disabled. Would need ASLO member credentials to access.
 """
 
 import logging
@@ -25,19 +29,19 @@ class ASLOScraper(BaseScraper):
     """
     Scraper for ASLO career center.
 
-    DISABLED: Requires JavaScript rendering (MemberSuite platform).
+    Disabled: MemberSuite platform requires membership login.
     """
 
     scraper_id = "aslo"
 
     def search(self, query_params: dict | None = None) -> str:
-        """Raise error - scraper disabled."""
+        """Disabled — requires membership login (MemberSuite platform)."""
         raise ScraperError(
-            scraper_id=self.scraper_id,
-            message="Job board requires JavaScript rendering (MemberSuite platform)",
-            url="http://aslo.users.membersuite.com/community/career-center/browse-jobs"
+            self.scraper_id,
+            "Career center requires membership login (MemberSuite platform)",
+            "http://aslo.users.membersuite.com/community/career-center/browse-jobs",
         )
 
     def parse(self, raw_data: str) -> list[Job]:
-        """Disabled - always returns empty list."""
+        """Not implemented — search() raises."""
         return []

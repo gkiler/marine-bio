@@ -1,20 +1,20 @@
 """
 American Fisheries Society job scraper.
 
-BLOCKED: jobs.fisheries.org uses Cloudflare JavaScript challenge
-that blocks all automated HTTP requests, including those with full browser headers.
-The site returns 403 Forbidden with a "Just a moment..." challenge page.
+BLOCKED: jobs.fisheries.org uses Cloudflare JavaScript challenge that
+blocks even headless Playwright browsers. The page returns the "Just a
+moment..." challenge and never resolves to actual content.
 
-This scraper is disabled and will return 0 jobs until a JavaScript-enabled solution
-(Playwright, Selenium) is implemented.
+Tested 2026-02-12 with Playwright:
+- Page timed out during render (45s)
+- Captured 27k chars — all Cloudflare challenge HTML
+- Page title: "Just a moment..."
+- No job content anywhere in DOM
+- Cloudflare detects headless browser despite Playwright
 
-Verified blocking on 2026-02-12:
-- Main job board: jobs.fisheries.org blocked (cf-mitigated: challenge)
-- Alternative paths: /careers/, /employment/, /jobs/ all blocked
-- Entire fisheries.org domain protected by Cloudflare
-- Response header: 'cf-mitigated': 'challenge'
-
-Alternative: Manual job alerts or contact AFS for API access.
+To potentially fix: try playwright-stealth plugin, but Cloudflare detection
+is increasingly resistant to stealth techniques. May need residential proxy
+or manual RSS/API approach.
 """
 
 import logging
@@ -32,33 +32,19 @@ class AFSScraper(BaseScraper):
     """
     Scraper for American Fisheries Society job board.
 
-    Currently disabled due to Cloudflare JavaScript challenge.
+    Disabled: Cloudflare challenge blocks all automated access.
     """
 
     scraper_id = "afs"
 
     def search(self, query_params: dict | None = None) -> str:
-        """
-        AFS job board blocks automated requests with Cloudflare challenge.
-
-        Raises ScraperError to indicate the site is not scrapable without JS.
-        """
-        logger.warning(
-            "AFS scraper is disabled: jobs.fisheries.org uses Cloudflare JavaScript "
-            "challenge that blocks all automated HTTP requests. Requires JavaScript-enabled "
-            "browser (Playwright/Selenium)."
-        )
+        """Disabled — Cloudflare JavaScript challenge blocks access."""
         raise ScraperError(
             self.scraper_id,
-            "Site blocked by Cloudflare challenge - requires JavaScript execution",
+            "Site blocked by Cloudflare challenge",
             "https://jobs.fisheries.org",
         )
 
     def parse(self, raw_data: str) -> list[Job]:
-        """
-        Not implemented - site requires JavaScript.
-
-        This method will never be called since search() raises an error.
-        """
-        logger.error("AFS scraper parse() called - should not happen")
+        """Not implemented — search() raises."""
         return []

@@ -1,17 +1,16 @@
 """
 Idealist scraper - idealist.org (filtered by environment/science)
 
-BLOCKED: Idealist is a React single-page application (SPA) that renders all job
-listings dynamically via JavaScript. The static HTML contains only an empty #root div
-with no body content at all.
+BLOCKED: Idealist is a React SPA. Playwright renders the page shell but the
+search query parameter (?q=marine+biology&searchMode=true) does not trigger
+an actual search — the page loads the generic homepage instead.
 
-This scraper is disabled and will return 0 jobs until a JavaScript-enabled solution
-(Playwright, Selenium) is implemented.
+Tested 2026-02-12 with Playwright:
+- Rendered 136k chars of HTML but 0 job listing links (/en/job/ pattern)
+- Search requires client-side JavaScript interaction (typing in search box + submit)
+- Would need Playwright page.fill() + page.click() interaction to trigger search
 
-Verified blocking on 2026-02-12:
-- Site uses React SPA with client-side rendering
-- Body is completely empty (0 chars)
-- No job listings present in static HTML
+This scraper remains disabled. To re-enable, implement JS interaction in search().
 """
 
 import logging
@@ -29,31 +28,19 @@ class Idealist(BaseScraper):
     """
     Scraper for Idealist nonprofit/social impact job board.
 
-    Currently disabled due to JavaScript-based SPA rendering.
+    Disabled: React SPA requires JS interaction to trigger search.
     """
 
     scraper_id = "idealist"
 
     def search(self, query_params: dict | None = None) -> str:
-        """
-        Idealist uses React SPA that requires JavaScript execution.
-
-        Raises ScraperError to indicate the site is not scrapable without JS.
-        """
-        logger.warning(
-            "Idealist scraper is disabled: site uses React SPA that renders "
-            "all content client-side. Requires JavaScript-enabled browser (Playwright/Selenium)."
-        )
+        """Disabled — search requires JS interaction (fill + click)."""
         raise ScraperError(
             self.scraper_id,
-            "Site requires JavaScript execution - React SPA with client-side rendering",
+            "Site requires JavaScript interaction to trigger search (React SPA)",
             "https://www.idealist.org/en/jobs",
         )
 
     def parse(self, raw_data: str) -> list[Job]:
-        """
-        Not implemented - site requires JavaScript.
-
-        This method will never be called since search() raises an error.
-        """
+        """Not implemented — search() raises."""
         return []

@@ -1,19 +1,18 @@
 """
 Academic scraper - higheredjobs.com (higher education jobs)
 
-BLOCKED: HigherEdJobs uses JavaScript-based bot detection (Cloudflare/PerimeterX)
-that blocks all automated HTTP requests, including those with browser headers and cookies.
-The site returns "Pardon Our Interruption" page for all requests.
+BLOCKED: HigherEdJobs uses PerimeterX bot detection that blocks even
+headless Playwright browsers. The site returns a minimal challenge page
+(~1068 chars) with no job content.
 
-This scraper is disabled and will return 0 jobs until a JavaScript-enabled solution
-(Playwright, Selenium) is implemented.
+Tested 2026-02-12 with Playwright:
+- Page timed out during render (45s)
+- Only 1068 chars captured — bot detection challenge page
+- No job content in DOM at all
+- Neither httpx nor Playwright can bypass PerimeterX
 
-Verified blocking on 2026-02-05:
-- Search URLs: advanced_action.cfm blocked
-- RSS feeds: jobFeed.cfm blocked
-- All endpoints return bot detection page
-
-Alternative: Manual job alerts or contact site for API access.
+This scraper remains disabled. Would need playwright-stealth or a
+residential proxy to bypass bot detection.
 """
 
 import logging
@@ -31,32 +30,19 @@ class Academic(BaseScraper):
     """
     Scraper for HigherEdJobs academic job board.
 
-    Currently disabled due to JavaScript-based bot detection.
+    Disabled: PerimeterX bot detection blocks all automated access.
     """
 
     scraper_id = "academic"
 
     def search(self, query_params: dict | None = None) -> str:
-        """
-        HigherEdJobs blocks automated requests with bot detection.
-
-        Raises ScraperError to indicate the site is not scrapable without JS.
-        """
-        logger.warning(
-            "HigherEdJobs scraper is disabled: site uses bot detection that blocks "
-            "all automated HTTP requests. Requires JavaScript-enabled browser (Playwright/Selenium)."
-        )
+        """Disabled — PerimeterX bot detection blocks automated access."""
         raise ScraperError(
             self.scraper_id,
-            "Site blocked by bot detection - requires JavaScript execution",
+            "Site blocked by PerimeterX bot detection",
             "https://www.higheredjobs.com/",
         )
 
     def parse(self, raw_data: str) -> list[Job]:
-        """
-        Not implemented - site requires JavaScript.
-
-        This method will never be called since search() raises an error.
-        """
-        logger.error("Academic scraper parse() called - should not happen")
+        """Not implemented — search() raises."""
         return []
