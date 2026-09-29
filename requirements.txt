@@ -18,3 +18,7 @@ google-genai>=1.0.0
 # Utilities
 python-dotenv>=1.0.0
 tenacity>=8.0.0
+tqdm>=4.66.0
+
+# Tests
+pytest>=8.0.0

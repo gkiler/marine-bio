@@ -4,9 +4,12 @@ __pycache__/
 *$py.class
 *.so
 *.egg-info/
-dist/
 build/
 *.egg
+
+# Generated job pages (scraped listings stay local)
+dist/
+docs/index.html
 
 # Environment
 .env

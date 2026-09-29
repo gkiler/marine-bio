@@ -2,7 +2,7 @@
 Marine Bio Job Finder — Streamlit UI.
 
 Single-page job aggregator: sidebar filters + job list.
-Scrapes 34 marine biology job sources, deduplicates, classifies
+Scrapes 30 marine biology job sources, deduplicates, classifies
 entry-level suitability, and presents a filterable job queue.
 """
 
@@ -43,7 +43,6 @@ from scrapers import (  # noqa: F401
     ecojobs_scraper,
     envcareer_scraper,
     idealist_scraper,
-    indeed_scraper,
     academic_scraper,
 )
 
@@ -245,7 +244,7 @@ sort_by = st.sidebar.selectbox("Sort by", ["Newest first", "Employer A-Z", "Sour
 
 # --- Main area ---
 st.title("Marine Bio Job Finder")
-st.caption("Aggregating entry-level marine biology jobs from 34 sources")
+st.caption("Aggregating entry-level marine biology jobs from 30 sources")
 
 # Load data
 if not selected_sources:

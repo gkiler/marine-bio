@@ -79,8 +79,6 @@ SOURCES: list[JobSource] = [
               notes="DISABLED: Requires JavaScript (React SPA)"),
 
     # Tier 9: General with marine filters
-    JobSource("Indeed", "https://www.indeed.com", "html", 9, "indeed",
-              notes="Search for 'marine biology' keyword"),
     JobSource("HigherEdJobs", "https://www.higheredjobs.com", "html", 9, "academic"),
 ]
 # fmt: on
